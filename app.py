@@ -1168,7 +1168,7 @@ def meal_block(prefix: str, title: str, enable_photo: bool):
 
 def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
-    st.caption("朝と夕だけで入力し、1日のPFCを推定します（昼は入力不要）。")
+    st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
     sport = st.session_state.get("sport", SPORTS[0])
     age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
@@ -1193,14 +1193,61 @@ def meal_page(code_hash: str):
 
     with st.expander("朝食", expanded=True):
         b = meal_block("b", "朝食", True)
-    with st.expander("昼食", expanded=True):
-        is_kyu = st.checkbox("給食（写真なし推定）", value=False, key="l_kyu")
-        if is_kyu:
-            l = kyushoku_template(age_years)
-            st.caption("給食は学年相当の平均値から自動推定します。")
+
+    # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
+    with st.expander("昼食", expanded=False):
+        st.markdown("#### 昼食")
+        is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
+        if is_school:
+            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。メニューが分かれば入力してください。")
+            menu = st.text_area("メニュー（分かる範囲で）", key="l_menu", placeholder="例：ごはん、鶏の照り焼き、みそ汁、牛乳…")
+            lk = st.number_input("推定カロリー（kcal）", 0.0, 2000.0, value=650.0, step=10.0, key="l_kcal_simple")
+            lp = st.number_input("たんぱく質（g）", 0.0, 200.0, value=25.0, step=1.0, key="l_p_simple")
+            lc = st.number_input("炭水化物（g）", 0.0, 400.0, value=90.0, step=1.0, key="l_c_simple")
+            lf = st.number_input("脂質（g）", 0.0, 200.0, value=18.0, step=1.0, key="l_f_simple")
+            l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
         else:
-            l = meal_block("l", "昼食", False)
+            st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
+            l = meal_block("l", "昼食", True)
+            l["mode"] = "normal"
+
+        # 昼食のAIコメント（しっかり）
+        if st.button("昼食のAIコメント（しっかり）", key="l_ai_comment_btn"):
+            # 目標との差分を昼の一言に落とす
+            targets_local = targets  # meal_page内のtargetsを参照
+            # ここでは昼食単体と、昼までの累計でコメントを作る
+            p_l = float(l.get("p", 0.0) or 0.0)
+            c_l = float(l.get("c", 0.0) or 0.0)
+            f_l = float(l.get("f", 0.0) or 0.0)
+            k_l = float(l.get("kcal", 0.0) or 0.0)
+            menu_txt = l.get("menu", "") if isinstance(l, dict) else ""
+            system = "You are a sports nutrition coach for junior athletes. Output Japanese. Be specific with grams/portions. No long preface."
+            user = f"""目的: {goal}
+運動強度: {intensity}
+体重: {weight} kg
+1日の目標: kcal={targets_local['kcal']:.0f}, C={targets_local['c_g']:.0f}g, P={targets_local['p_g']:.0f}g, F={targets_local['f_g']:.0f}g
+
+昼食（推定）:
+- kcal: {k_l:.0f}
+- C/P/F: {c_l:.0f}g / {p_l:.0f}g / {f_l:.0f}g
+- メニュー: {menu_txt if menu_txt else "不明（写真/入力ベース）"}
+お願い:
+- 昼食の評価（良い点/改善点）を短く
+- 今日は“夕食でどう帳尻を合わせるか”を具体量で提案（例：ごはん何g、肉/魚何g、牛乳/ヨーグルト量）
+- もし不足が大きければ、間食案（1〜2個）も提案（コンビニで買えるレベル）
+- 文章は見出し＋箇条書き中心で、読みやすく
+"""
+            text, err = ai_text(system, user)
+            if err:
+                st.error("AIコメントに失敗: " + err)
+            else:
+                st.session_state["l_ai_comment_text"] = text
+        if st.session_state.get("l_ai_comment_text"):
+            st.markdown("##### AIコメント")
+            st.write(st.session_state["l_ai_comment_text"])
+
     with st.expander("夕食", expanded=True):
+
         d = meal_block("d", "夕食", True)
 
     tot_p = b["p"] + l["p"] + d["p"]
@@ -1277,63 +1324,72 @@ def meal_page(code_hash: str):
         save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
+
 def advice_page(code_hash: str):
     st.subheader("🤖 Aiアドバイス")
     sport = st.session_state.get("sport", SPORTS[0])
 
+    # ---- Training log (per-user latest + history) ----
+    with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
+        st.session_state.setdefault("tr_date", now_jst().date())
+        st.session_state.setdefault("tr_type", "チーム練習")
+        st.session_state.setdefault("tr_duration", 0)
+        st.session_state.setdefault("tr_rpe", 5)
+        st.session_state.setdefault("tr_focus", "")
+        st.session_state.setdefault("tr_notes", "")
 
-with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
-    st.session_state.setdefault("tr_date", now_jst().date())
-    st.session_state.setdefault("tr_type", "チーム練習")
-    st.session_state.setdefault("tr_duration", 0)
-    st.session_state.setdefault("tr_rpe", 5)
-    st.session_state.setdefault("tr_focus", "")
-    st.session_state.setdefault("tr_notes", "")
+        st.date_input("日付", value=st.session_state.get("tr_date"), key="tr_date")
+        st.selectbox(
+            "種類",
+            ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","リカバリー","その他"],
+            index=0,
+            key="tr_type"
+        )
+        st.number_input(
+            "時間（分）",
+            min_value=0, max_value=600,
+            value=int(st.session_state.get("tr_duration", 0) or 0),
+            step=5,
+            key="tr_duration"
+        )
+        st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
+        st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_focus",""), key="tr_focus")
+        st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
 
-    st.date_input("日付", value=st.session_state.get("tr_date"), key="tr_date")
-    st.selectbox("種類", ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","リカバリー","その他"],
-                 index=0, key="tr_type")
-    st.number_input("時間（分）", min_value=0, max_value=600,
-                    value=int(st.session_state.get("tr_duration", 0) or 0),
-                    step=5, key="tr_duration")
-    st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
-    st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_focus",""), key="tr_focus")
-    st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
-
-    cA, cB, cC = st.columns([1,1,2])
-    with cA:
-        if st.button("保存", key="tr_save"):
+        cA, cB, cC = st.columns([1,1,2])
+        with cA:
+            if st.button("保存", key="tr_log_save"):
+                try:
+                    save_training_latest(code_hash)
+                    st.success("保存しました。")
+                except Exception as e:
+                    st.error(f"保存に失敗: {e}")
+        with cB:
+            if st.button("最新を読み込み", key="tr_log_load"):
+                try:
+                    ok = load_training_latest(code_hash)
+                    if ok:
+                        st.success("最新のトレーニングを読み込みました。")
+                        st.rerun()
+                    else:
+                        st.info("保存データがありません。")
+                except Exception as e:
+                    st.error(f"読み込みに失敗: {e}")
+        with cC:
             try:
-                save_training_latest(code_hash)
-                st.success("保存しました。")
-            except Exception as e:
-                st.error(f"保存に失敗: {e}")
-    with cB:
-        if st.button("最新を読み込み", key="tr_load"):
-            try:
-                ok = load_training_latest(code_hash)
-                if ok:
-                    st.success("最新のトレーニングを読み込みました。")
-                    st.rerun()
-                else:
-                    st.info("保存データがありません。")
-            except Exception as e:
-                st.error(f"読み込みに失敗: {e}")
-    with cC:
-        try:
-            hist = load_records(code_hash, limit=30)
-            hist = [h for h in hist if h.get("kind")=="training_log"][:5]
-        except Exception:
-            hist = []
-        if hist:
-            st.caption("直近の保存（最大5件）")
-            for h in hist:
-                pl = h.get("payload") or {}
-                d = pl.get("tr_date","")
-                st.write(f"- {d} / {pl.get('tr_type','')} / {pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}")
+                hist = load_records(code_hash, limit=30)
+                hist = [h for h in hist if h.get("kind")=="training_log"][:5]
+            except Exception:
+                hist = []
+            if hist:
+                st.caption("直近の保存（最大5件）")
+                for h in hist:
+                    pl = h.get("payload") or {}
+                    d = pl.get("tr_date","")
+                    st.write(f"- {d} / {pl.get('tr_type','')} / {pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}")
 
-
-
+    # ---- Tabs ----
+    t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
     t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
 
     # -----------------
@@ -1384,7 +1440,7 @@ with st.expander("📝 トレーニング（保存・最新読み込み）", exp
             else:
                 st.write(text)
 
-        if st.button("トレーニングログを保存", key="tr_save"):
+        if st.button("トレーニングログを保存", key="tr_inputs_save"):
             save_record(code_hash, "training_inputs",
                         {"sport": sport, "weight": w, "bench1rm": bench1rm, "squat_est": squat_est,
                          "equipment": equipment, "days": days, "focus": focus},
@@ -1515,12 +1571,13 @@ with st.expander("📝 トレーニング（保存・最新読み込み）", exp
                 if err:
                     st.error("AIに失敗: " + err)
                 else:
-                    queries = [q.strip("-• \t") for q in (text or "").splitlines() if q.strip()]
+                    queries = [q.strip("-• 	") for q in (text or "").splitlines() if q.strip()]
                     st.markdown("#### YouTube検索リンク")
                     import urllib.parse
                     for q in queries[:5]:
                         url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
                         st.markdown(f"- [{q}]({url})")
+
 
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
