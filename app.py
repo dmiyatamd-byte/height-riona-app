@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
+import calendar
 import altair as alt
 
 from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_id, simulate_predictions_for_case
@@ -176,6 +177,59 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 # =========================
 # Utils
 # =========================
+
+def parse_menu_sections(menu_text: str):
+    """Split menu text into sections by headings like '【上半身】' etc."""
+    t = (menu_text or "").strip()
+    if not t:
+        return []
+    # Normalize newlines
+    t = t.replace('\r\n','\n').replace('\r','\n')
+    # If it already contains bracket headings, split on them
+    parts = re.split(r'(?=^【[^】]{1,20}】\s*$)', t, flags=re.M)
+    sections = []
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        m = re.match(r'^【([^】]{1,20})】\s*\n?(.*)$', p, flags=re.S)
+        if m:
+            title = m.group(1).strip()
+            body = m.group(2).strip()
+            sections.append((title, body))
+        else:
+            sections.append(("全体", p))
+    return sections
+
+def render_menu_blocks(menu_text: str):
+    """Render larger, copy-friendly menu blocks."""
+    st.markdown("""<style>
+    /* Make textareas easier to read */
+    div[data-testid="stTextArea"] textarea { font-size: 16px !important; line-height: 1.5 !important; }
+    </style>""", unsafe_allow_html=True)
+
+    st.markdown("#### 生成メニュー（見やすく／コピーしやすく）")
+    full = (menu_text or "").strip()
+    if not full:
+        st.info("メニューがまだ生成されていません。")
+        return
+
+    # Copy-all
+    st.text_area("（全文）", value=full, height=260, key="tr_menu_text_area")
+    copy_button("メニューをコピー（全文）", full, key="copy_tr_menu_btn_all")
+    st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくのがおすすめです。")
+
+    secs = parse_menu_sections(full)
+    if len(secs) <= 1:
+        return
+
+    for i, (title, body) in enumerate(secs, start=1):
+        with st.expander(f"{title}（開く）", expanded=(title in ["上半身","下半身","体幹","４週間の進め方","4週間の進め方"])): 
+            txt = f"【{title}】\n{body}".strip()
+            st.text_area("", value=txt, height=220, key=f"tr_menu_sec_{i}")
+            copy_button(f"{title}をコピー", txt, key=f"copy_tr_menu_sec_{i}")
+
+
 def now_jst():
     return datetime.now(TZ)
 
@@ -1480,6 +1534,11 @@ def meal_page(code_hash: str):
 
 def advice_page(code_hash: str):
     st.subheader("🤖 Aiアドバイス")
+    st.markdown("""<style>
+    /* Make tabs easier to find */
+    div[data-baseweb="tab"] button{font-size:16px !important; padding:10px 14px !important;}
+    div[data-baseweb="tab-list"]{gap:6px;}
+    </style>""", unsafe_allow_html=True)
     sport = st.session_state.get("sport", SPORTS[0])
 
     # ---- Training log (per-user latest + history) ----
@@ -1542,6 +1601,106 @@ def advice_page(code_hash: str):
                     st.write(f"- {d} / {pl.get('tr_type','')} / {pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}")
 
     # ---- Tabs ----
+    
+    # ---- 端末保存（CSV/カレンダー） ----
+    with st.expander("📱 トレーニング記録を端末に保存／カレンダーで見る", expanded=False):
+        try:
+            recs = load_records(code_hash, limit=400)
+            recs = [r for r in recs if r.get("kind") == "training_log"]
+        except Exception:
+            recs = []
+
+        if not recs:
+            st.info("まだトレーニング記録がありません（上で「保存」を押すと蓄積されます）。")
+        else:
+            # Build DataFrame
+            rows = []
+            for r in recs:
+                pl = r.get("payload") or {}
+                rows.append({
+                    "date": pl.get("tr_date",""),
+                    "type": pl.get("tr_type",""),
+                    "duration_min": pl.get("tr_duration",""),
+                    "rpe": pl.get("tr_rpe",""),
+                    "goal": pl.get("tr_focus","") or st.session_state.get("tr_goal_text",""),
+                    "notes": pl.get("tr_notes",""),
+                })
+            df = pd.DataFrame(rows)
+            # CSV download (device-side)
+            csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ CSVとして保存（端末に残す）", data=csv_bytes, file_name="training_log.csv", mime="text/csv")
+
+            # Simple iCalendar export
+            def _ics_escape(s: str) -> str:
+                s = str(s or "")
+                return s.replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,').replace('\n', '\\n')
+            ics_lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Kiwi//TrainingLog//JA"]
+            for i, row in df.head(300).iterrows():
+                d = str(row.get("date",""))
+                if not d:
+                    continue
+                # all-day event
+                try:
+                    y,m,dd = [int(x) for x in d.split("-")]
+                    dt = date(y,m,dd)
+                    dtstr = dt.strftime("%Y%m%d")
+                except Exception:
+                    continue
+                summary = _ics_escape(f"TR: {row.get('type','')} {row.get('duration_min','')}分 RPE{row.get('rpe','')}")
+                desc = _ics_escape(f"目的: {row.get('goal','')}\nメモ: {row.get('notes','')}")
+                uid = f"tr-{dtstr}-{i}@kiwi"
+                ics_lines += ["BEGIN:VEVENT", f"UID:{uid}", f"DTSTART;VALUE=DATE:{dtstr}", f"SUMMARY:{summary}", f"DESCRIPTION:{desc}", "END:VEVENT"]
+            ics_lines.append("END:VCALENDAR")
+            ics_bytes = ("\r\n".join(ics_lines) + "\r\n").encode("utf-8")
+            st.download_button("⬇️ カレンダー用(.ics)で保存", data=ics_bytes, file_name="training_log.ics", mime="text/calendar")
+
+            st.caption("※コピー/保存したデータは、スマホのファイルやGoogle/Appleカレンダーに取り込むと見返しやすいです。")
+
+            # Calendar view (month grid)
+            st.markdown("#### 🗓️ アプリ内カレンダー表示")
+            # Determine available months
+            dates = []
+            for d in df["date"].dropna().astype(str).tolist():
+                try:
+                    y,m,_ = [int(x) for x in d.split("-")]
+                    dates.append((y,m))
+                except Exception:
+                    pass
+            months = sorted(set(dates), reverse=True)
+            if not months:
+                st.info("日付データがありません。")
+            else:
+                month_labels = [f"{y}-{m:02d}" for y,m in months]
+                sel = st.selectbox("表示する月", month_labels, index=0, key="tr_cal_month")
+                y, m = [int(x) for x in sel.split("-")]
+                # map date->entries
+                day_map = {}
+                for _, row in df.iterrows():
+                    d = str(row.get("date",""))
+                    if d.startswith(f"{y}-{m:02d}-"):
+                        day = int(d.split("-")[2])
+                        day_map.setdefault(day, []).append(row)
+                cal = calendar.monthcalendar(y, m)
+                # headers
+                week_header = ["月","火","水","木","金","土","日"]
+                cols = st.columns(7)
+                for i, w in enumerate(week_header):
+                    cols[i].markdown(f"**{w}**")
+                for week in cal:
+                    cols = st.columns(7)
+                    for i, day in enumerate(week):
+                        with cols[i]:
+                            if day == 0:
+                                st.write("")
+                            else:
+                                st.markdown(f"**{day}**")
+                                entries = day_map.get(day, [])
+                                if entries:
+                                    for e in entries[:2]:
+                                        st.caption(f"{e.get('type','')} {e.get('duration_min','')}分")
+                                    if len(entries) > 2:
+                                        st.caption(f"+{len(entries)-2}件")
+
     t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
 
     # -----------------
@@ -1591,9 +1750,7 @@ def advice_page(code_hash: str):
                 st.error("AI提案に失敗: " + err)
             else:
                 st.session_state["tr_menu_text"] = text
-                st.markdown("#### 生成メニュー")
-                st.text_area("（コピー用）", value=text, height=260, key="tr_menu_text_area")
-                copy_button("メニューをコピー", text, key="copy_tr_menu_btn")
+                render_menu_blocks(text)
 
         if st.button("トレーニングログを保存", key="tr_inputs_save"):
             save_record(code_hash, "training_inputs",
