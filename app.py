@@ -1609,7 +1609,19 @@ def advice_page(code_hash: str):
             key="tr_duration"
         )
         st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
-        st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_goal_text",""), key="tr_goal_text")
+                # 主目的（プリセット＋自由入力）
+        goal_opts = ["スプリント", "当たり負け改善", "持久力", "低酸素トレーニング", "リカバリー", "技術練習", "その他（自由入力）"]
+        cur_goal = (st.session_state.get("tr_goal_text") or "").strip()
+        default_idx = 0
+        if cur_goal in goal_opts:
+            default_idx = goal_opts.index(cur_goal)
+        elif cur_goal:
+            default_idx = goal_opts.index("その他（自由入力）")
+        goal_sel = st.selectbox("主目的", goal_opts, index=default_idx, key="tr_goal_sel")
+        if goal_sel == "その他（自由入力）":
+            st.text_input("主目的（自由入力）", value=cur_goal, key="tr_goal_text")
+        else:
+            st.session_state["tr_goal_text"] = goal_sel
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
 
         cA, cB, cD, cC = st.columns([1,1,1,2])
@@ -1776,6 +1788,22 @@ def advice_page(code_hash: str):
     except Exception:
         pass
 
+    # タブの視認性改善（文字サイズ・余白）
+    st.markdown("""<style>
+    div[data-baseweb="tab-list"]{gap:10px;}
+    button[data-baseweb="tab"]{
+        font-size:16px !important;
+        padding:10px 14px !important;
+    }
+    button[data-baseweb="tab"] span{
+        font-size:16px !important;
+        font-weight:600 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"]{
+        border-radius:12px !important;
+    }
+    </style>""", unsafe_allow_html=True)
+
     t1, t2, t3, t4 = st.tabs(["🏋️ トレーニング", "🩹 怪我", "😴 睡眠", "🎥 サッカー動画"])
 
 
@@ -1801,7 +1829,7 @@ def advice_page(code_hash: str):
         equipment = st.selectbox("使える器具", ["自重中心（道具なし）", "ダンベル/チューブあり", "バーベル（ベンチ・スクワット可能）"],
                                  index=0, key="tr_equipment")
         days = st.selectbox("週あたりの筋トレ日数", [1,2,3,4], index=2, key="tr_days")
-        focus = st.selectbox("今の目的（筋トレ）", ["強くなる", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_menu_focus")
+        focus = st.selectbox("筋トレの目的", ["バルクアップ", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_menu_focus")
 
         if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
             system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
@@ -1933,6 +1961,32 @@ def advice_page(code_hash: str):
             score -= 15
         score = max(0, min(100, score))
         st.write(f"睡眠スコア（簡易）：{score}/100")
+        # AIによる睡眠アドバイス（任意）
+        if st.button("AIで睡眠アドバイスを作る", key="sl_ai_make"):
+            system = (
+                "You are a sports medicine clinician and youth athlete performance coach. "
+                "Give practical, safe, and actionable sleep advice for a junior soccer athlete. "
+                "Use short Japanese bullets. Avoid long lectures. "
+                "Include: (1) 評価（良い点/課題）, (2) 今日からできる改善3つ, "
+                "(3) 就寝前ルーティン例, (4) 明日の練習/試合に向けたポイント."
+            )
+            user = f"起床時刻: {wake}\n睡眠時間: {sleep_h}時間\n就寝前スクリーン: {screen}分\n睡眠スコア(簡易): {score}/100"
+            out, err = ai_text(system, user)
+            if err:
+                st.error("AIに失敗: " + err)
+                out = (
+                    f"・睡眠時間は{sleep_h}時間。成長期は8〜10時間を目安にしましょう。\n"
+                    f"・就寝前スクリーンは{screen}分。可能なら就寝60分前からオフ。\n"
+                    "・朝は起床後に光を浴び、同じ起床時刻を維持すると整いやすいです。"
+                )
+            st.session_state["sl_ai_text"] = out
+
+        if st.session_state.get("sl_ai_text"):
+            st.markdown("#### 😴 睡眠AIアドバイス")
+            st.text_area("（コピーして共有OK）", value=st.session_state.get("sl_ai_text",""), height=180, key="sl_ai_view")
+            copy_button("睡眠アドバイスをコピー", st.session_state.get("sl_ai_text",""), key="copy_sleep_advice")
+            st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと振り返りに便利です。")
+
         if st.button("睡眠ログを保存", key="sl_save"):
             save_record(code_hash, "sleep_log",
                         {"wake": str(wake), "sleep_h": float(sleep_h), "screen": int(screen), "score": int(score)},
