@@ -27,6 +27,57 @@ OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 # =========================
 TZ = timezone(timedelta(hours=9))
 JST = TZ  # alias
+
+# =========================
+# AIコメントの永続化（翌日・別端末でも残す）
+# - st.session_stateに加えて、DB(snapshots)に保存します
+# - ブラウザ/端末を変えても、同じIDでログインすれば復元できます
+AI_PERSIST_KEYS = [
+    "tr_menu_text",      # 筋トレメニュー
+    "sl_ai_text",        # 睡眠AIアドバイス
+    "inj_ai_text",       # 怪我AIコメント
+    "l_ai_comment_text", # 食事（昼）のAIコメント（給食/非給食共通で使う想定）
+]
+
+def _ai_cache_load(code_hash: str) -> dict:
+    d = load_snapshot(code_hash, "ai_cache") or {}
+    if isinstance(d, dict):
+        return d
+    return {}
+
+def _ai_cache_save(code_hash: str, cache: dict) -> None:
+    if not isinstance(cache, dict):
+        return
+    save_snapshot(code_hash, "ai_cache", cache)
+
+def restore_ai_cache_to_session(code_hash: str) -> None:
+    cache = _ai_cache_load(code_hash)
+    for k in AI_PERSIST_KEYS:
+        v = cache.get(k)
+        if v:
+            st.session_state.setdefault(k, v)
+
+def persist_ai_cache_from_session(code_hash: str) -> None:
+    cache = _ai_cache_load(code_hash)
+    changed = False
+    for k in AI_PERSIST_KEYS:
+        v = st.session_state.get(k)
+        if v and cache.get(k) != v:
+            cache[k] = v
+            changed = True
+    if changed:
+        _ai_cache_save(code_hash, cache)
+
+def download_text_button(label: str, text: str, filename: str, key: str):
+    if not text:
+        return
+    st.download_button(
+        label,
+        data=text.encode("utf-8"),
+        file_name=filename,
+        mime="text/plain",
+        key=key
+    )
 SPORTS = ["サッカー", "ラグビー", "野球", "テニス", "水泳"]
 RESERVE_URL = "https://qr.digikar-smart.jp/6bcfb249-1c73-4789-af01-2cb02fec9f42/reserve"
 
@@ -1933,7 +1984,21 @@ def injury_page(code_hash: str):
         if err:
             st.error("AIコメントに失敗: " + err)
         else:
-            st.write(text)
+            st.session_state["inj_ai_text"] = text
+            st.markdown("#### 🩹 怪我AIコメント（保存されます）")
+            st.text_area("（コピーして共有OK）", value=text, height=220, key="inj_ai_view")
+            copy_button("怪我コメントをコピー", text, key="copy_injury_ai")
+            download_text_button("怪我コメントをTXTで保存", text, filename="injury_ai_comment.txt", key="dl_injury_ai")
+            st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと、翌日以降も見返しやすいです。")
+# 以前生成したAIコメント（IDに紐づいて復元）
+if st.session_state.get("inj_ai_text"):
+    st.markdown("#### 🩹 怪我AIコメント（前回の続き）")
+    st.text_area("（コピーして共有OK）", value=st.session_state.get("inj_ai_text",""), height=220, key="inj_ai_view_prev")
+    copy_button("怪我コメントをコピー", st.session_state.get("inj_ai_text",""), key="copy_injury_ai_prev")
+    download_text_button("怪我コメントをTXTで保存", st.session_state.get("inj_ai_text",""), filename="injury_ai_comment.txt", key="dl_injury_ai_prev")
+    st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと、翌日以降も見返しやすいです。")
+
+
 
     if st.button("怪我ログを保存", key="inj_save"):
         save_record(code_hash, "injury_log",
@@ -1986,6 +2051,7 @@ def sleep_page(code_hash: str):
         st.markdown("#### 😴 睡眠AIアドバイス")
         st.text_area("（コピーして共有OK）", value=st.session_state.get("sl_ai_text",""), height=180, key="sl_ai_view")
         copy_button("睡眠アドバイスをコピー", st.session_state.get("sl_ai_text",""), key="copy_sleep_advice")
+        download_text_button("睡眠アドバイスをTXTで保存", st.session_state.get("sl_ai_text",""), filename="sleep_ai_advice.txt", key="dl_sleep_advice")
         st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと振り返りに便利です。")
 
     if st.button("睡眠ログを保存", key="sl_save"):
@@ -2039,6 +2105,9 @@ def main():
 
     code_hash = sha256_hex(user)
 
+    # AIコメント（メニュー/睡眠/怪我/食事など）を前回分から復元
+    restore_ai_cache_to_session(code_hash)
+
     # per-user saved data
     try:
         load_basic_info_snapshot(code_hash)
@@ -2072,6 +2141,12 @@ def main():
         soccer_video_page(code_hash)
     else:
         exercise_prescription_page(code_hash)
+
+    # AIコメントをDBに保存（翌日・別端末でも復元できる）
+    try:
+        persist_ai_cache_from_session(code_hash)
+    except Exception:
+        pass
 
 if __name__ == "__main__":
     main()
