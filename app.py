@@ -7,6 +7,7 @@ import base64
 from datetime import datetime, timedelta, timezone, date, time
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import altair as alt
@@ -180,6 +181,33 @@ def now_jst():
 
 def iso(dt):
     return dt.astimezone(TZ).isoformat()
+
+def copy_button(label: str, text_to_copy: str, key: str):
+    """One-click copy to clipboard (Streamlit)."""
+    # Escape for JS template literal
+    t = (text_to_copy or "")
+    t = t.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+    html = f"""
+<button id='{key}' style='padding:0.45rem 0.8rem;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;'>
+  {label}
+</button>
+<script>
+const btn = document.getElementById('{key}');
+btn.addEventListener('click', async () => {{
+  try {{
+    await navigator.clipboard.writeText(`{t}`);
+    const prev = btn.innerText;
+    btn.innerText = 'コピーしました';
+    setTimeout(()=>{{ btn.innerText = prev; }}, 1200);
+  }} catch (e) {{
+    btn.innerText = 'コピー失敗';
+    setTimeout(()=>{{ btn.innerText = '{label}'; }}, 1500);
+  }}
+}});
+</script>
+"""
+    components.html(html, height=55)
+
 
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
@@ -460,7 +488,7 @@ def load_training_latest(code_hash: str) -> bool:
     if isinstance(pl.get("tr_date"), str):
         try:
             y,m,d = [int(x) for x in pl["tr_date"].split("-")]
-            pl["tr_date"] = date(y,m,d)
+            pl["tr_date"] = date(y,m,d)e(y,m,d)
         except Exception:
             pass
     for k in TRAINING_KEYS:
@@ -1093,6 +1121,51 @@ def meal_estimate(c_level: str, p_level: str, v_level: str, fried: bool, dairy: 
     kcal = p*4 + c*4 + f*9 + veg_k
     return {"p":p,"c":c,"f":f,"kcal":kcal}
 
+def meal_share(prefix: str):
+    # Rough split for youth athletes
+    return {"b": 0.25, "l": 0.35, "d": 0.40}.get(prefix, 0.33)
+
+def rate_meal(prefix: str, est: dict, targets: dict):
+    """Return (score:int, status:str, bullets:list[str]) based on kcal/P relative to allocated share."""
+    share = meal_share(prefix)
+    tk = max(1.0, float(targets.get("kcal", 0.0)) * share)
+    tp = max(1.0, float(targets.get("p_g", 0.0)) * share)
+
+    kcal = float(est.get("kcal", 0.0))
+    p = float(est.get("p", 0.0))
+
+    r_k = kcal / tk
+    r_p = p / tp
+
+    # Score: penalize kcal deviation and protein shortage more than excess
+    pen_k = min(45.0, abs(r_k - 1.0) * 90.0)
+    pen_p = 0.0
+    if r_p < 1.0:
+        pen_p = min(55.0, (1.0 - r_p) * 120.0)
+    else:
+        pen_p = min(15.0, (r_p - 1.0) * 25.0)
+
+    score = int(max(0.0, min(100.0, 100.0 - pen_k - pen_p)))
+
+    bullets = []
+    if r_k < 0.85:
+        bullets.append("エネルギーが少なめ（午後の集中・練習前後のパフォーマンス低下に注意）")
+    elif r_k > 1.20:
+        bullets.append("エネルギーが多め（他の食事で調整できればOK）")
+    else:
+        bullets.append("エネルギー量は概ね適正")
+
+    if r_p < 0.85:
+        bullets.append("たんぱく質が不足気味（成長・回復のために主菜を増やす）")
+    elif r_p > 1.20:
+        bullets.append("たんぱく質は十分（取り過ぎ自体は大きな問題になりにくい）")
+    else:
+        bullets.append("たんぱく質量は概ね適正")
+
+    status = "目的に合っている" if score >= 75 else ("まずまず" if score >= 55 else "改善余地あり")
+    return score, status, bullets
+
+
 def kyushoku_template(age_years: float):
     # 小学生/中学生で推定
     if age_years < 12:
@@ -1129,9 +1202,10 @@ def eval_ratio(actual: float, target: float) -> str:
     return "過剰"
 
 
-def meal_block(prefix: str, title: str, enable_photo: bool):
+
+def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
     """
-    食事1回分の入力（チェック式 + 朝/夕のみ写真AI）
+    食事1回分の入力（チェック式 + 写真AI）
     prefix: "b"/"l"/"d"
     """
     st.markdown(f"#### {title}")
@@ -1142,18 +1216,46 @@ def meal_block(prefix: str, title: str, enable_photo: bool):
         if up is not None:
             img_bytes = up.getvalue()
             st.image(up, caption="アップロード画像", use_container_width=True)
+
             if st.button("AIで推論（少/普/多）", key=f"{prefix}_ai_btn"):
                 out, err = analyze_meal_photo(img_bytes, title)
                 if err:
                     st.error("写真解析に失敗: " + err)
                     ai = None
+                    st.session_state.pop(f"{prefix}_comment", None)
+                    st.session_state.pop(f"{prefix}_score", None)
+                    st.session_state.pop(f"{prefix}_status", None)
+                    st.session_state.pop(f"{prefix}_bullets", None)
                 else:
                     ai = out
-                    st.success("推論が完了しました。")
-                st.session_state[f"{prefix}_ai"] = ai
-        if ai:
-            st.caption(f"AI推定: 主食={ai['carb']} 主菜={ai['protein']} 野菜={ai['veg']} 脂質={ai['fat']} (信頼度 {ai['confidence']:.2f})")
+                    st.session_state[f"{prefix}_ai"] = ai
 
+                    # estimate + rating
+                    est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                                        bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
+                    score, status, bullets = rate_meal(prefix, est, targets)
+                    st.session_state[f"{prefix}_score"] = score
+                    st.session_state[f"{prefix}_status"] = status
+                    st.session_state[f"{prefix}_bullets"] = bullets
+
+                    # AI寸評（失敗時は簡易）
+                    system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
+                    user = f"""{title}の写真推論（主食/主菜/野菜/脂質/乳製品/果物）からPFCとkcalを推定しました。
+推定: kcal={est['kcal']:.0f}, P={est['p']:.0f}g, C={est['c']:.0f}g, F={est['f']:.0f}g
+1日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
+この{title}は朝昼夕の配分を考えると、今の量が適切か、改善点を短い寸評（100〜140字）で書いてください。
+出力は寸評のみ。"""
+                    comment, e2 = ai_text(system, user)
+                    if e2 or not comment:
+                        comment = " / ".join(bullets)
+                    st.session_state[f"{prefix}_comment"] = comment.strip()
+
+                    st.success("推論が完了しました。")
+
+        if ai:
+            st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')} (信頼度 {ai.get('confidence',0):.2f})")
+
+    # 手入力（AIが無い/微調整用）
     c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
     p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
     v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
@@ -1161,11 +1263,40 @@ def meal_block(prefix: str, title: str, enable_photo: bool):
     fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
     fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
 
+    # 推定（AIがあればAI優先）
     if ai:
-        return meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
-                             bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
-    return meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
+        est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                            bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
+    else:
+        est = meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
 
+    # 表示（点数・栄養評価・寸評）
+    score = st.session_state.get(f"{prefix}_score")
+    status = st.session_state.get(f"{prefix}_status")
+    bullets = st.session_state.get(f"{prefix}_bullets") or []
+    comment = st.session_state.get(f"{prefix}_comment")
+
+    st.markdown("##### 推定PFC / kcal")
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("P", f"{est['p']:.0f} g")
+    m2.metric("C", f"{est['c']:.0f} g")
+    m3.metric("F", f"{est['f']:.0f} g")
+    m4.metric("kcal", f"{est['kcal']:.0f}")
+
+    if score is None or status is None:
+        # AI推論前でも評価は出す（手入力ベース）
+        s2, st2, bl2 = rate_meal(prefix, est, targets)
+        score, status, bullets = s2, st2, bl2
+
+    st.markdown(f"##### {title}スコア：**{int(score)} / 100**（{status}）")
+    if bullets:
+        for b in bullets:
+            st.write("・" + b)
+    if comment:
+        st.markdown("##### 寸評")
+        st.write(comment)
+
+    return est
 def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
@@ -1214,7 +1345,7 @@ def meal_page(code_hash: str):
 
 
     with st.expander("朝食", expanded=True):
-        b = meal_block("b", "朝食", True)
+        b = meal_block("b", "朝食", True, targets)
 
     # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
     with st.expander("昼食", expanded=False):
@@ -1230,7 +1361,7 @@ def meal_page(code_hash: str):
             l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
         else:
             st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
-            l = meal_block("l", "昼食", True)
+            l = meal_block("l", "昼食", True, targets)
             l["mode"] = "normal"
 
         # 昼食のAIコメント（しっかり）
@@ -1270,7 +1401,7 @@ def meal_page(code_hash: str):
 
     with st.expander("夕食", expanded=True):
 
-        d = meal_block("d", "夕食", True)
+        d = meal_block("d", "夕食", True, targets)
 
     tot_p = b["p"] + l["p"] + d["p"]
     tot_c = b["c"] + l["c"] + d["c"]
@@ -1459,7 +1590,10 @@ def advice_page(code_hash: str):
             if err:
                 st.error("AI提案に失敗: " + err)
             else:
-                st.write(text)
+                st.session_state["tr_menu_text"] = text
+                st.markdown("#### 生成メニュー")
+                st.text_area("（コピー用）", value=text, height=260, key="tr_menu_text_area")
+                copy_button("メニューをコピー", text, key="copy_tr_menu_btn")
 
         if st.button("トレーニングログを保存", key="tr_inputs_save"):
             save_record(code_hash, "training_inputs",
