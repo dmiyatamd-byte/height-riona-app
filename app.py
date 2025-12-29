@@ -1765,6 +1765,19 @@ def advice_page(code_hash: str):
                 st.dataframe(cal_df, use_container_width=True, hide_index=True)
 
     # ---- Tabs ----
+    # 見つけやすいタブUI
+    try:
+        st.markdown(
+            """<style>
+            div[data-baseweb="tab-list"] button {font-size: 16px !important; padding: 10px 14px !important;}
+            </style>""",
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        pass
+
+    t1, t2, t3, t4 = st.tabs(["🏋️ トレーニング", "🩹 怪我", "😴 睡眠", "🎥 サッカー動画"])
+
 
     # -----------------
     # トレーニング
