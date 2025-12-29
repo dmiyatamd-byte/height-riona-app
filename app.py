@@ -3,6 +3,7 @@ import sqlite3
 import hashlib
 import secrets
 import json
+import re
 import base64
 from datetime import datetime, timedelta, timezone, date, time
 
@@ -456,6 +457,35 @@ def load_records(code_hash: str, limit: int = 200):
         except Exception:
             pass
     return out
+
+
+def delete_snapshot(code_hash: str, kind: str) -> None:
+    conn = sqlite3.connect(DATA_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM snapshots WHERE code_hash=? AND kind=?", (code_hash, kind))
+    conn.commit()
+    conn.close()
+
+def delete_record_by_id(record_id: int) -> None:
+    conn = sqlite3.connect(DATA_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM records WHERE id=?", (int(record_id),))
+    conn.commit()
+    conn.close()
+
+def delete_latest_record(code_hash: str, kind: str) -> bool:
+    conn = sqlite3.connect(DATA_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM records WHERE code_hash=? AND kind=? ORDER BY id DESC LIMIT 1", (code_hash, kind))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return False
+    rid = int(row[0])
+    cur.execute("DELETE FROM records WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    return True
 def auto_fill_from_latest_records(code_hash: str):
     """基本情報入力後に、最新の保存記録をフォームに自動反映（初回のみ）"""
     if st.session_state.get("_auto_filled", False):
@@ -1560,7 +1590,6 @@ def advice_page(code_hash: str):
         st.number_input(
             "時間（分）",
             min_value=0, max_value=600,
-            value=int(st.session_state.get("tr_duration", 0) or 0),
             step=5,
             key="tr_duration"
         )
@@ -1568,7 +1597,7 @@ def advice_page(code_hash: str):
         st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_goal_text",""), key="tr_goal_text")
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
 
-        cA, cB, cC = st.columns([1,1,2])
+        cA, cB, cD, cC = st.columns([1,1,1,2])
         with cA:
             if st.button("保存", key="tr_log_save"):
                 try:
@@ -1587,7 +1616,21 @@ def advice_page(code_hash: str):
                         st.info("保存データがありません。")
                 except Exception as e:
                     st.error(f"読み込みに失敗: {e}")
-        with cC:
+        
+        with cD:
+            if st.button("削除（最新）", key="tr_log_delete"):
+                try:
+                    delete_snapshot(code_hash, "training_latest")
+                    delete_latest_record(code_hash, "training_log")
+                    # also clear current inputs to defaults
+                    st.session_state["tr_duration"] = 0
+                    st.session_state["tr_rpe"] = 5
+                    st.session_state["tr_notes"] = ""
+                    st.success("最新の保存データを削除しました。")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"削除に失敗: {e}")
+with cC:
             try:
                 hist = load_records(code_hash, limit=30)
                 hist = [h for h in hist if h.get("kind")=="training_log"][:5]
@@ -1626,6 +1669,31 @@ def advice_page(code_hash: str):
                     "notes": pl.get("tr_notes",""),
                 })
             df = pd.DataFrame(rows)
+
+            # Delete specific record by date (most recent match)
+            st.markdown("##### 🗑️ 記録の削除")
+            dates = [r.get("payload",{}).get("tr_date","") for r in recs if (r.get("payload") or {}).get("tr_date")]
+            dates = [d for d in dates if d]
+            if dates:
+                target_date = st.selectbox("削除したい日付", sorted(list(set(dates)), reverse=True), key="tr_delete_date")
+                if st.button("この日付の最新記録を削除", key="tr_delete_by_date"):
+                    try:
+                        # delete newest record with that date
+                        rid_to_del = None
+                        for r in sorted(recs, key=lambda x: x.get("id",0), reverse=True):
+                            if (r.get("payload") or {}).get("tr_date","") == target_date and r.get("kind")=="training_log":
+                                rid_to_del = r.get("id")
+                                break
+                        if rid_to_del is None:
+                            st.info("該当記録が見つかりません。")
+                        else:
+                            delete_record_by_id(int(rid_to_del))
+                            st.success("削除しました。")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"削除に失敗: {e}")
+            else:
+                st.caption("削除できる記録がありません。")
             # CSV download (device-side)
             csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
             st.download_button("⬇️ CSVとして保存（端末に残す）", data=csv_bytes, file_name="training_log.csv", mime="text/csv")
@@ -1768,7 +1836,7 @@ def advice_page(code_hash: str):
 
         cols = st.columns(3)
         locs = []
-        loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "膝", "足首", "踵/足底"]
+        loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "太もも", "ハムストリング", "膝", "足首", "踵/足底"]
         for i, loc in enumerate(loc_list):
             with cols[i % 3]:
                 if st.checkbox(loc, key=f"inj_loc_{loc}"):
