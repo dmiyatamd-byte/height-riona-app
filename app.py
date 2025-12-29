@@ -1630,7 +1630,7 @@ def advice_page(code_hash: str):
                     st.rerun()
                 except Exception as e:
                     st.error(f"削除に失敗: {e}")
-with cC:
+        with cC:
             try:
                 hist = load_records(code_hash, limit=30)
                 hist = [h for h in hist if h.get("kind")=="training_log"][:5]
@@ -1643,8 +1643,6 @@ with cC:
                     d = pl.get("tr_date","")
                     st.write(f"- {d} / {pl.get('tr_type','')} / {pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}")
 
-    # ---- Tabs ----
-    
     # ---- 端末保存（CSV/カレンダー） ----
     with st.expander("📱 トレーニング記録を端末に保存／カレンダーで見る", expanded=False):
         try:
@@ -1656,120 +1654,102 @@ with cC:
         if not recs:
             st.info("まだトレーニング記録がありません（上で「保存」を押すと蓄積されます）。")
         else:
-            # Build DataFrame
             rows = []
             for r in recs:
                 pl = r.get("payload") or {}
                 rows.append({
-                    "date": pl.get("tr_date",""),
-                    "type": pl.get("tr_type",""),
-                    "duration_min": pl.get("tr_duration",""),
-                    "rpe": pl.get("tr_rpe",""),
-                    "goal": pl.get("tr_focus","") or st.session_state.get("tr_goal_text",""),
-                    "notes": pl.get("tr_notes",""),
+                    "date": str(pl.get("tr_date", "")),
+                    "type": str(pl.get("tr_type", "")),
+                    "duration_min": pl.get("tr_duration", ""),
+                    "rpe": pl.get("tr_rpe", ""),
+                    "goal": pl.get("tr_goal_text", pl.get("tr_focus", "")) or "",
+                    "notes": str(pl.get("tr_notes", "")),
                 })
             df = pd.DataFrame(rows)
 
-            # Delete specific record by date (most recent match)
             st.markdown("##### 🗑️ 記録の削除")
-            dates = [r.get("payload",{}).get("tr_date","") for r in recs if (r.get("payload") or {}).get("tr_date")]
-            dates = [d for d in dates if d]
+            dates = [d for d in df["date"].dropna().astype(str).tolist() if d]
             if dates:
                 target_date = st.selectbox("削除したい日付", sorted(list(set(dates)), reverse=True), key="tr_delete_date")
                 if st.button("この日付の最新記録を削除", key="tr_delete_by_date"):
                     try:
-                        # delete newest record with that date
-                        rid_to_del = None
-                        for r in sorted(recs, key=lambda x: x.get("id",0), reverse=True):
-                            if (r.get("payload") or {}).get("tr_date","") == target_date and r.get("kind")=="training_log":
-                                rid_to_del = r.get("id")
-                                break
-                        if rid_to_del is None:
-                            st.info("該当記録が見つかりません。")
-                        else:
-                            delete_record_by_id(int(rid_to_del))
-                            st.success("削除しました。")
-                            st.rerun()
+                        # newest record with that date
+                        for r in recs:
+                            pl = r.get("payload") or {}
+                            if str(pl.get("tr_date", "")) == target_date:
+                                rid = r.get("id")
+                                if rid is not None:
+                                    delete_record_by_id(rid)
+                                    st.success("削除しました。")
+                                    st.rerun()
+                        st.warning("削除対象が見つかりませんでした。")
                     except Exception as e:
                         st.error(f"削除に失敗: {e}")
             else:
                 st.caption("削除できる記録がありません。")
-            # CSV download (device-side)
-            csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ CSVとして保存（端末に残す）", data=csv_bytes, file_name="training_log.csv", mime="text/csv")
 
-            # Simple iCalendar export
+            st.markdown("##### ⬇️ 端末に保存")
+            csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "CSVとして保存（端末に残す）",
+                data=csv_bytes,
+                file_name="training_log.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+            # iCalendar (.ics)
             def _ics_escape(s: str) -> str:
                 s = str(s or "")
-                return s.replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,').replace('\n', '\\n')
-            ics_lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Kiwi//TrainingLog//JA"]
-            for i, row in df.head(300).iterrows():
-                d = str(row.get("date",""))
+                return s.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+            ics_lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Kiwi//TrainingLog//JA"]
+            for r in recs:
+                pl = r.get("payload") or {}
+                d = str(pl.get("tr_date", ""))
                 if not d:
                     continue
-                # all-day event
                 try:
-                    y,m,dd = [int(x) for x in d.split("-")]
-                    dt = date(y,m,dd)
-                    dtstr = dt.strftime("%Y%m%d")
+                    y, m, dd = [int(x) for x in d.split("-")]
+                    dt = datetime(y, m, dd, 9, 0, tzinfo=JST)
                 except Exception:
                     continue
-                summary = _ics_escape(f"TR: {row.get('type','')} {row.get('duration_min','')}分 RPE{row.get('rpe','')}")
-                desc = _ics_escape(f"目的: {row.get('goal','')}\nメモ: {row.get('notes','')}")
-                uid = f"tr-{dtstr}-{i}@kiwi"
-                ics_lines += ["BEGIN:VEVENT", f"UID:{uid}", f"DTSTART;VALUE=DATE:{dtstr}", f"SUMMARY:{summary}", f"DESCRIPTION:{desc}", "END:VEVENT"]
+                summary = f"TR: {pl.get('tr_type','')}"
+                desc = f"{pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}\n{pl.get('tr_notes','')}"
+                uid = f"{r.get('id','')}-{code_hash}@kiwi"
+                ics_lines += [
+                    "BEGIN:VEVENT",
+                    f"UID:{_ics_escape(uid)}",
+                    f"DTSTAMP:{dt.strftime('%Y%m%dT%H%M%SZ')}",
+                    f"DTSTART:{dt.strftime('%Y%m%dT%H%M%S')}",
+                    f"SUMMARY:{_ics_escape(summary)}",
+                    f"DESCRIPTION:{_ics_escape(desc)}",
+                    "END:VEVENT",
+                ]
             ics_lines.append("END:VCALENDAR")
-            ics_bytes = ("\r\n".join(ics_lines) + "\r\n").encode("utf-8")
-            st.download_button("⬇️ カレンダー用(.ics)で保存", data=ics_bytes, file_name="training_log.ics", mime="text/calendar")
+            ics_bytes = "\n".join(ics_lines).encode("utf-8")
+            st.download_button(
+                "カレンダー用(.ics)で保存",
+                data=ics_bytes,
+                file_name="training_log.ics",
+                mime="text/calendar",
+                use_container_width=True,
+            )
 
-            st.caption("※コピー/保存したデータは、スマホのファイルやGoogle/Appleカレンダーに取り込むと見返しやすいです。")
+            st.markdown("##### 📅 アプリ内カレンダー（一覧）")
+            # very simple month filter
+            today = datetime.now(JST).date()
+            ym_options = sorted(list(set([d[:7] for d in dates if len(d) >= 7])), reverse=True)
+            default_ym = today.strftime("%Y-%m")
+            if default_ym not in ym_options and ym_options:
+                default_ym = ym_options[0]
+            ym = st.selectbox("表示する月", ym_options or [default_ym], index=0, key="tr_cal_month")
+            if ym:
+                cal_df = df[df["date"].astype(str).str.startswith(ym)].copy()
+                cal_df = cal_df.sort_values("date", ascending=True)
+                st.dataframe(cal_df, use_container_width=True, hide_index=True)
 
-            # Calendar view (month grid)
-            st.markdown("#### 🗓️ アプリ内カレンダー表示")
-            # Determine available months
-            dates = []
-            for d in df["date"].dropna().astype(str).tolist():
-                try:
-                    y,m,_ = [int(x) for x in d.split("-")]
-                    dates.append((y,m))
-                except Exception:
-                    pass
-            months = sorted(set(dates), reverse=True)
-            if not months:
-                st.info("日付データがありません。")
-            else:
-                month_labels = [f"{y}-{m:02d}" for y,m in months]
-                sel = st.selectbox("表示する月", month_labels, index=0, key="tr_cal_month")
-                y, m = [int(x) for x in sel.split("-")]
-                # map date->entries
-                day_map = {}
-                for _, row in df.iterrows():
-                    d = str(row.get("date",""))
-                    if d.startswith(f"{y}-{m:02d}-"):
-                        day = int(d.split("-")[2])
-                        day_map.setdefault(day, []).append(row)
-                cal = calendar.monthcalendar(y, m)
-                # headers
-                week_header = ["月","火","水","木","金","土","日"]
-                cols = st.columns(7)
-                for i, w in enumerate(week_header):
-                    cols[i].markdown(f"**{w}**")
-                for week in cal:
-                    cols = st.columns(7)
-                    for i, day in enumerate(week):
-                        with cols[i]:
-                            if day == 0:
-                                st.write("")
-                            else:
-                                st.markdown(f"**{day}**")
-                                entries = day_map.get(day, [])
-                                if entries:
-                                    for e in entries[:2]:
-                                        st.caption(f"{e.get('type','')} {e.get('duration_min','')}分")
-                                    if len(entries) > 2:
-                                        st.caption(f"+{len(entries)-2}件")
-
-    t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
+    # ---- Tabs ----
 
     # -----------------
     # トレーニング
