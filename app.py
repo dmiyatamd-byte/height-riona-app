@@ -2317,6 +2317,203 @@ def advice_page(code_hash: str, mode: str = "all"):
                         st.markdown(f"- [{q}]({url})")
 
 
+
+# =========================
+# JAMS Logo footer (simple)
+# =========================
+def render_jams_footer():
+    p = _find_jams_logo_path()
+    if not p:
+        return
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c2:
+        try:
+            st.image(p, use_container_width=True)
+        except TypeError:
+            st.image(p, width=220)
+
+# =========================
+# Standalone pages: Injury / Sleep / Soccer Video
+# =========================
+def injury_page(code_hash: str):
+    st.subheader("🩹 怪我")
+    st.caption("痛みや違和感を記録し、必要に応じて受診や練習調整の判断材料にします。")
+
+    # --- load latest ---
+    if st.button("怪我の最新記録を読み込む", key="inj_load_btn"):
+        pl = load_snapshot(code_hash, "injury_latest") or {}
+        for k, v in pl.items():
+            st.session_state[f"inj_{k}"] = v
+        st.success("怪我の最新記録を読み込みました。")
+
+    # Locations (checkbox grid)
+    loc_list = [
+        "足首", "膝", "股関節", "太もも", "ハムストリング", "ふくらはぎ",
+        "腰", "背中", "肩", "肘", "手首", "足裏", "その他"
+    ]
+    st.markdown("#### 部位（複数選択）")
+    cols = st.columns(3)
+    locs = []
+    for i, loc in enumerate(loc_list):
+        with cols[i % 3]:
+            if st.checkbox(loc, key=f"inj_loc_{loc}", value=bool(st.session_state.get(f"inj_loc_{loc}", False))):
+                locs.append(loc)
+
+    pain = st.slider("痛み（0-10）", 0, 10, int(st.session_state.get("inj_pain", 0)), key="inj_pain")
+    onset = st.selectbox(
+        "きっかけ",
+        ["不明", "急に（ひねった・ぶつけた・着地で痛い）", "徐々に（使い過ぎ・張り）", "再発"],
+        index=0,
+        key="inj_onset",
+    )
+    when = st.selectbox("いつから", ["今日", "昨日", "2-3日前", "1週間以内", "1週間以上"], index=0, key="inj_when")
+    note = st.text_area("メモ（痛む動き、練習で困ること等）", key="inj_note", height=120)
+
+    # Save (vertical)
+    if st.button("怪我の記録を保存", key="inj_save_btn"):
+        payload = {
+            "date": datetime.now(timezone(timedelta(hours=9))).date().isoformat(),
+            "locs": locs,
+            "pain": pain,
+            "onset": onset,
+            "when": when,
+            "note": note,
+        }
+        save_snapshot(code_hash, "injury_latest", payload)
+        save_record(code_hash, "injury_log", payload)
+        st.success("保存しました。")
+    if st.button("怪我の最新記録を削除", key="inj_del_btn"):
+        save_snapshot(code_hash, "injury_latest", {})
+        st.success("最新記録を削除しました。")
+
+    render_jams_footer()
+
+
+def sleep_page(code_hash: str):
+    st.subheader("😴 睡眠")
+    st.caption("睡眠は成長・回復・怪我予防の土台です。簡単に記録し、AIでアドバイスも作れます。")
+
+    if st.button("睡眠の最新記録を読み込む", key="sl_load_btn"):
+        pl = load_snapshot(code_hash, "sleep_latest") or {}
+        for k, v in pl.items():
+            st.session_state[f"sl_{k}"] = v
+        st.success("睡眠の最新記録を読み込みました。")
+
+    wake = st.time_input("起床時刻", value=st.session_state.get("sl_wake", time(7, 0)), key="sl_wake")
+    bed = st.time_input("就寝時刻（目安）", value=st.session_state.get("sl_bed", time(22, 30)), key="sl_bed")
+    sleep_h = st.number_input("睡眠時間（時間）", min_value=0.0, max_value=14.0, step=0.25, value=float(st.session_state.get("sl_sleep_h", 8.0)), key="sl_sleep_h")
+    quality = st.slider("睡眠の質（0-10）", 0, 10, int(st.session_state.get("sl_quality", 7)), key="sl_quality")
+    screen = st.slider("就寝前スクリーン時間（分）", 0, 240, int(st.session_state.get("sl_screen", 30)), key="sl_screen")
+    soreness = st.selectbox("起床時の疲労感", ["軽い", "普通", "強い"], index=["軽い","普通","強い"].index(st.session_state.get("sl_soreness","普通")), key="sl_soreness")
+    memo = st.text_area("メモ（昼寝、夜間覚醒、翌日の練習量など）", key="sl_memo", height=120)
+
+    if st.button("睡眠の記録を保存", key="sl_save_btn"):
+        payload = {
+            "date": datetime.now(timezone(timedelta(hours=9))).date().isoformat(),
+            "wake": wake.strftime("%H:%M"),
+            "bed": bed.strftime("%H:%M"),
+            "sleep_h": sleep_h,
+            "quality": quality,
+            "screen": screen,
+            "soreness": soreness,
+            "memo": memo,
+        }
+        save_snapshot(code_hash, "sleep_latest", payload)
+        save_record(code_hash, "sleep_log", payload)
+        st.success("保存しました。")
+    if st.button("睡眠の最新記録を削除", key="sl_del_btn"):
+        save_snapshot(code_hash, "sleep_latest", {})
+        st.success("最新記録を削除しました。")
+
+    st.markdown("#### AIで睡眠アドバイス（任意）")
+    if st.button("AIで睡眠アドバイスを作る", key="sl_ai_make_page"):
+        client, err = openai_client()
+        if err:
+            st.error(err)
+        else:
+            system = (
+                "You are a sports medicine clinician and youth athlete performance coach. "
+                "Give practical, safe, and actionable sleep advice for a junior soccer athlete. "
+                "Use short Japanese bullets. Avoid long lectures. "
+                "Include: (1) 評価（良い点/課題）, (2) 今日からできる改善3つ, "
+                "(3) 就寝前ルーティン例, (4) 明日の練習/試合に向けたポイント."
+            )
+            user = f"""起床時刻: {wake}
+就寝時刻: {bed}
+睡眠時間: {sleep_h}時間
+睡眠の質: {quality}/10
+就寝前スクリーン: {screen}分
+起床時の疲労感: {soreness}
+メモ: {memo}
+"""
+            try:
+                resp = client.responses.create(
+                    model="gpt-4.1-mini",
+                    input=[
+                        {"role": "system", "content": [{"type": "input_text", "text": system}]},
+                        {"role": "user", "content": [{"type": "input_text", "text": user}]},
+                    ],
+                )
+                text = (resp.output_text or "").strip()
+                st.session_state["sl_ai_text"] = text
+            except Exception as e:
+                st.error(str(e))
+
+    ai_text = st.session_state.get("sl_ai_text", "")
+    if ai_text:
+        st.text_area("睡眠アドバイス", value=ai_text, height=220, key="sl_ai_text_area")
+        components.html(
+            f"""
+            <script>
+            function copyText() {{
+              navigator.clipboard.writeText({json.dumps(ai_text)});
+            }}
+            </script>
+            <button onclick="copyText()" style="padding:10px 14px; border-radius:10px; border:1px solid #ddd; cursor:pointer;">
+              睡眠アドバイスをコピー
+            </button>
+            """,
+            height=60,
+        )
+        st.info("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくのがおすすめです。")
+
+    render_jams_footer()
+
+
+def soccer_video_page(code_hash: str):
+    st.subheader("🎥 サッカー動画")
+    st.caption("動画URLと観点を整理して、次の練習や面談に活かします。")
+
+    if st.button("サッカー動画メモを読み込む", key="vd_load_btn"):
+        pl = load_snapshot(code_hash, "video_latest") or {}
+        for k, v in pl.items():
+            st.session_state[f"vd_{k}"] = v
+        st.success("読み込みました。")
+
+    url = st.text_input("動画URL（YouTube等）", value=st.session_state.get("vd_url",""), key="vd_url")
+    focus = st.text_input("観点（例：守備の立ち位置、1stタッチ、視野）", value=st.session_state.get("vd_focus",""), key="vd_focus")
+    memo = st.text_area("メモ（良かった点/改善点/次の課題）", value=st.session_state.get("vd_memo",""), key="vd_memo", height=160)
+
+    if st.button("動画メモを保存", key="vd_save_btn"):
+        payload = {
+            "date": datetime.now(timezone(timedelta(hours=9))).date().isoformat(),
+            "url": url,
+            "focus": focus,
+            "memo": memo,
+        }
+        save_snapshot(code_hash, "video_latest", payload)
+        save_record(code_hash, "video_log", payload)
+        st.success("保存しました。")
+    if st.button("動画メモの最新を削除", key="vd_del_btn"):
+        save_snapshot(code_hash, "video_latest", {})
+        st.success("最新メモを削除しました。")
+
+    if url:
+        st.link_button("動画を開く", url)
+
+    render_jams_footer()
+
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     apply_css()
@@ -2345,17 +2542,31 @@ def main():
     auto_fill_latest_all_tabs(code_hash)
     auto_fill_from_latest_records(code_hash)
 
-    set_jams_background(opacity=0.05)
-
     st.markdown("### 画面選択")
-    with st.sidebar:
-        st.markdown("### ページ")
-        nav = st.radio(
-            "",
-            ["運動処方", "食事管理", "身長予測", "スポーツ貧血", "怪我", "睡眠", "サッカー動画"],
-            index=0,
-            key="nav_main",
-        )
+    st.markdown(
+        """
+        <style>
+        /* Mobile-friendly navigation */
+        div[role="radiogroup"] label { margin-right: 6px; }
+        div[role="radiogroup"] > label { padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(0,0,0,0.08); }
+        div[role="radiogroup"] span { font-size: 16px; }
+        @media (max-width: 640px){
+          div[role="radiogroup"] { flex-wrap: wrap !important; }
+          div[role="radiogroup"] > label { width: 48%; box-sizing: border-box; margin-bottom: 8px; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # モバイルでサイドバーが隠れやすいので、本文側にもページ切替を表示します
+    nav = st.radio(
+        "ページ",
+        ["運動処方", "食事管理", "身長予測", "スポーツ貧血", "怪我", "睡眠", "サッカー動画"],
+        index=0,
+        horizontal=True,
+        key="nav_main",
+    )
 
     if nav == "運動処方":
         advice_page(code_hash, mode="training")
@@ -2366,11 +2577,11 @@ def main():
     elif nav == "スポーツ貧血":
         anemia_page(code_hash)
     elif nav == "怪我":
-        advice_page(code_hash, mode="injury")
+        injury_page(code_hash)
     elif nav == "睡眠":
-        advice_page(code_hash, mode="sleep")
+        sleep_page(code_hash)
     elif nav == "サッカー動画":
-        advice_page(code_hash, mode="video")
+        soccer_video_page(code_hash)
     else:
         advice_page(code_hash, mode="training")
 
