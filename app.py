@@ -351,6 +351,100 @@ btn.addEventListener('click', async () => {{
     components.html(html, height=55)
 
 
+# -------------------------
+# UI helpers: header/logo & AI comment persistence display
+# -------------------------
+
+def jams_logo_header():
+    """Show JAMS logo at the top of the page if available."""
+    p = _find_jams_logo_path()
+    if not p:
+        return
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        st.image(p, width=220)
+
+def premium_css():
+    """Lightweight premium-ish UI (kids-friendly, readable)."""
+    st.markdown(
+        """
+<style>
+/* Larger base font for kids */
+html, body, [class*="css"]  { font-size: 16px !important; }
+
+/* Make tab labels bigger & easier to tap */
+div[data-baseweb="tab"] button {
+  font-size: 16px !important;
+  padding: 12px 14px !important;
+  border-radius: 14px !important;
+}
+
+/* AI highlight card */
+.ai-card {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 250, 235, 0.9);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+}
+.ai-title {
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+.ai-text { font-size: 15px; line-height: 1.7; white-space: pre-wrap; }
+
+/* Section header card */
+.section-card {
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(0,0,0,0.05);
+  margin: 10px 0 14px 0;
+}
+.section-card h2 { margin: 0; font-size: 18px; }
+.section-card p { margin: 6px 0 0 0; color: rgba(0,0,0,0.6); }
+
+/* Buttons: slightly rounded */
+button[kind="secondary"], button[kind="primary"] { border-radius: 12px !important; }
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def ai_highlight_box(title: str, text: str):
+    if not text:
+        return
+    st.markdown(
+        f"""<div class="ai-card">
+  <div class="ai-title">✨ {title}</div>
+  <div class="ai-text">{text}</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+def saved_ai_footer(items):
+    """Footer area where saved comments are shown + copy buttons."""
+    st.markdown("---")
+    st.subheader("📌 保存したAIコメント")
+    shown = False
+    for item in items:
+        key = item.get("key")
+        title = item.get("title", key)
+        text = st.session_state.get(key, "") if key else ""
+        if not text:
+            continue
+        shown = True
+        with st.expander(title, expanded=False):
+            copy_button("このコメントをコピー", text, key=f"copy_{key}")
+            st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくのがおすすめです。")
+            st.text_area("内容", value=text, height=220, key=f"ta_{key}")
+    if not shown:
+        st.info("保存済みのAIコメントはまだありません。AIでコメントを作るとここに残ります。")
+
+
+
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
@@ -938,6 +1032,7 @@ def classify_type(delta: float):
     return "normal", "正常"
 
 def height_page(code_hash: str):
+    jams_logo_header()
     st.subheader("身長予測")
     # load/save buttons adjacent
     if st.button("記入データ読込", key="h_load_top"):
@@ -1130,6 +1225,7 @@ def estimate_endurance_gain(test_kind: str, baseline_value: float, hb_now: float
     return baseline_value * (1.0 + pct), pct
 
 def anemia_page(code_hash: str):
+    jams_logo_header()
     hb_v = ferr_v = fe_v = tibc_v = tsat_val = None
     st.subheader("貧血・リオナ")
     if st.button("記入データ読込", key="a_load_top"):
@@ -1469,6 +1565,7 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
 
     return est
 def meal_page(code_hash: str):
+    jams_logo_header()
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
@@ -1581,8 +1678,7 @@ def meal_page(code_hash: str):
             else:
                 st.session_state["l_ai_comment_text"] = text
         if st.session_state.get("l_ai_comment_text"):
-            st.markdown("##### AIコメント")
-            st.write(st.session_state["l_ai_comment_text"])
+            ai_highlight_box("昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
 
     with st.expander("夕食", expanded=True):
 
@@ -1662,8 +1758,14 @@ def meal_page(code_hash: str):
         save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
+    # --- 保存済みAIコメント（コピーはここから） ---
+    saved_ai_footer([
+        {"key": "l_ai_comment_text", "title": "🍱 食事管理：昼食のAIコメント"},
+    ])
+
 
 def exercise_prescription_page(code_hash: str):
+    jams_logo_header()
     st.subheader("🏋️ 運動処方")
     sport = st.session_state.get("sport", SPORTS[0])
     # ---- Training log (per-user latest + history) ----
@@ -1911,8 +2013,14 @@ def exercise_prescription_page(code_hash: str):
         # 怪我
         # -----------------
     jams_logo_footer()
+    # --- 保存済みAIコメント（コピーはここから） ---
+    saved_ai_footer([
+        {"key": "tr_menu_text", "title": "🏋️ 運動処方：筋トレメニュー"},
+    ])
+
 
 def injury_page(code_hash: str):
+    jams_logo_header()
     st.subheader("🩹 怪我")
     sport = st.session_state.get("sport", SPORTS[0])
     st.markdown("### 怪我のチェック")
@@ -2012,8 +2120,14 @@ if st.session_state.get("inj_ai_text"):
         # 睡眠
         # -----------------
     jams_logo_footer()
+    # --- 保存済みAIコメント（コピーはここから） ---
+    saved_ai_footer([
+        {"key": "inj_ai_text", "title": "🩹 怪我：AIコメント"},
+    ])
+
 
 def sleep_page(code_hash: str):
+    jams_logo_header()
     st.subheader("😴 睡眠")
     sport = st.session_state.get("sport", SPORTS[0])
     st.markdown("### 睡眠")
@@ -2067,8 +2181,14 @@ def sleep_page(code_hash: str):
     # サッカー動画（YouTube検索）
     # -----------------
     jams_logo_footer()
+    # --- 保存済みAIコメント（コピーはここから） ---
+    saved_ai_footer([
+        {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
+    ])
+
 
 def soccer_video_page(code_hash: str):
+    jams_logo_header()
     st.subheader("🎥 サッカー動画")
     sport = st.session_state.get("sport", SPORTS[0])
     if sport != "サッカー":
@@ -2093,6 +2213,7 @@ def soccer_video_page(code_hash: str):
     jams_logo_footer()
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
+    premium_css()
     apply_css()
     init_users_db()
     init_data_db()
