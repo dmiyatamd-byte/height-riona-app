@@ -17,6 +17,72 @@ import altair as alt
 from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_id, simulate_predictions_for_case
 
 # =========================
+# Branding (JAMS logo)
+# =========================
+def _find_jams_logo_path() -> str | None:
+    """Return a local path for JAMS logo if present."""
+    candidates = [
+        "JAMSロゴ.png",
+        "JAMSロゴ.png",
+        "assets/JAMSロゴ.png",
+        "assets/JAMSロゴ.png",
+        "static/JAMSロゴ.png",
+        "static/JAMSロゴ.png",
+    ]
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                return p
+        except Exception:
+            pass
+    return None
+
+def set_jams_background(opacity: float = 0.05, size_px: int = 520) -> None:
+    """Set a subtle JAMS watermark as page background (logged-in pages)."""
+    p = _find_jams_logo_path()
+    if not p:
+        return
+    try:
+        with open(p, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+    except Exception:
+        return
+
+    # Keep it subtle and non-interfering
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{b64}");
+            background-repeat: no-repeat;
+            background-position: right 32px bottom 32px;
+            background-size: {size_px}px;
+            background-attachment: fixed;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+def render_login_brand() -> None:
+    """Render login header with JAMS logo if available."""
+    p = _find_jams_logo_path()
+    st.markdown('<div style="text-align:center; margin: 18px 0 10px 0;">', unsafe_allow_html=True)
+    if p:
+        st.image(p, width=260)
+        st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div style="font-size:52px; line-height:1;">🩺⚽</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        '<div style="font-size:26px; font-weight:800; margin-top:6px;">プライベートスポーツドクター</div>'
+        '<div style="font-size:13px; color:#6b7280; margin-top:6px;">Junior Athlete Medical Support</div>'
+        '<div style="font-size:12px; color:#6b7280; margin-top:4px;">運動・栄養・医療を一体でサポート</div>',
+        unsafe_allow_html=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# =========================
 # テスト用（後でSecretsへ移行）
 # =========================
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
@@ -348,6 +414,7 @@ def create_user(username: str, password: str) -> str | None:
     return None
 
 def login_panel() -> str | None:
+    render_login_brand()
     st.markdown("## ログイン（テスト段階）")
     t = st.tabs(["ログイン", "初回登録"])
     with t[0]:
@@ -1574,7 +1641,7 @@ def meal_page(code_hash: str):
 
 
 def advice_page(code_hash: str):
-    st.subheader("🤖 Aiアドバイス")
+    st.subheader("🏋️ 運動処方 / AIアドバイス")
     st.markdown("""<style>
     /* Make tabs easier to find */
     div[data-baseweb="tab"] button{font-size:16px !important; padding:10px 14px !important;}
@@ -1800,7 +1867,11 @@ def advice_page(code_hash: str):
     }
     </style>""", unsafe_allow_html=True)
 
-    t1, t2, t3, t4 = st.tabs(["🏋️ トレーニング", "🩹 怪我", "😴 睡眠", "🎥 サッカー動画"])
+    labels = ["🏋️ トレーニング", "🩹 怪我", "😴 睡眠", "🎥 サッカー動画"]
+    preferred = st.session_state.get("advice_tab_pref", labels[0])
+    if preferred in labels:
+        labels = [preferred] + [x for x in labels if x != preferred]
+    t1, t2, t3, t4 = st.tabs(labels)
 
 
     # -----------------
@@ -2046,17 +2117,35 @@ def main():
     auto_fill_from_latest_records(code_hash)
 
     st.markdown("### 画面選択")
-    with st.container():
-        nav = st.radio("", ["身長予測","貧血・リオナ","食事ログ","Aiアドバイス"], horizontal=True, key="nav_main")
-    if nav == "身長予測":
-        height_page(code_hash)
-    elif nav == "貧血・リオナ":
-        anemia_page(code_hash)
-    elif nav == "食事ログ":
+    with st.sidebar:
+        st.markdown("### ページ")
+        nav = st.radio(
+            "",
+            ["運動処方", "食事管理", "身長予測", "スポーツ貧血", "怪我", "睡眠", "サッカー動画"],
+            index=0,
+            key="nav_main",
+        )
+
+    if nav == "運動処方":
+        st.session_state["advice_tab_pref"] = "🏋️ トレーニング"
+        advice_page(code_hash)
+    elif nav == "食事管理":
         meal_page(code_hash)
-    elif nav == "Aiアドバイス":
+    elif nav == "身長予測":
+        height_page(code_hash)
+    elif nav == "スポーツ貧血":
+        anemia_page(code_hash)
+    elif nav == "怪我":
+        st.session_state["advice_tab_pref"] = "🩹 怪我"
+        advice_page(code_hash)
+    elif nav == "睡眠":
+        st.session_state["advice_tab_pref"] = "😴 睡眠"
+        advice_page(code_hash)
+    elif nav == "サッカー動画":
+        st.session_state["advice_tab_pref"] = "🎥 サッカー動画"
         advice_page(code_hash)
     else:
+        st.session_state["advice_tab_pref"] = "🏋️ トレーニング"
         advice_page(code_hash)
 
 if __name__ == "__main__":
