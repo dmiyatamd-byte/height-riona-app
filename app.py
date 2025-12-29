@@ -1170,6 +1170,28 @@ def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
+    # --- 保存/読込（食事ログ）---
+    c1, c2 = st.columns(2)
+    if c1.button("読込", key="meal_load_top"):
+        payload = load_snapshot(code_hash, "meal_draft")
+        if payload:
+            for k, v in payload.items():
+                st.session_state[k] = v
+            st.success("読み込みました。")
+            st.rerun()
+        else:
+            st.info("保存データがありません。")
+    if c2.button("保存", key="meal_save_top"):
+        keys = [
+            "meal_goal", "meal_intensity", "meal_weight",
+            "school_lunch", "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
+            "b_c", "b_p", "b_v", "b_dairy", "b_fruit", "b_fried", "b_ai",
+            "l_c", "l_p", "l_v", "l_dairy", "l_fruit", "l_fried", "l_ai",
+            "d_c", "d_p", "d_v", "d_dairy", "d_fruit", "d_fried", "d_ai",
+        ]
+        save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
+        st.success("保存しました。")
+
     sport = st.session_state.get("sport", SPORTS[0])
     age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
@@ -1353,7 +1375,7 @@ def advice_page(code_hash: str):
             key="tr_duration"
         )
         st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
-        st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_focus",""), key="tr_focus")
+        st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_goal_text",""), key="tr_goal_text")
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
 
         cA, cB, cC = st.columns([1,1,2])
@@ -1390,7 +1412,6 @@ def advice_page(code_hash: str):
 
     # ---- Tabs ----
     t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
-    t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
 
     # -----------------
     # トレーニング
@@ -1414,7 +1435,7 @@ def advice_page(code_hash: str):
         equipment = st.selectbox("使える器具", ["自重中心（道具なし）", "ダンベル/チューブあり", "バーベル（ベンチ・スクワット可能）"],
                                  index=0, key="tr_equipment")
         days = st.selectbox("週あたりの筋トレ日数", [1,2,3,4], index=2, key="tr_days")
-        focus = st.selectbox("今の目的（筋トレ）", ["強くなる", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_focus")
+        focus = st.selectbox("今の目的（筋トレ）", ["強くなる", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_menu_focus")
 
         if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
             system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
