@@ -302,10 +302,8 @@ def render_menu_blocks(menu_text: str):
         st.info("メニューがまだ生成されていません。")
         return
 
-    # Copy-all
-    st.text_area("（全文）", value=full, height=260, key="tr_menu_text_area")
-    copy_button("メニューをコピー（全文）", full, key="copy_tr_menu_btn_all")
-    st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくのがおすすめです。")
+    ai_highlight_box("🏋️ 生成メニュー（保存されます）", full)
+    st.caption("※コピーはページ最下部の『保存したAIコメント』から行えます。")
 
     secs = parse_menu_sections(full)
     if len(secs) <= 1:
@@ -438,8 +436,9 @@ def saved_ai_footer(items):
         shown = True
         with st.expander(title, expanded=False):
             copy_button("このコメントをコピー", text, key=f"copy_{key}")
+            download_text_button("TXTで保存", text, filename=f"{title}.txt", key=f"dl_{key}")
             st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくのがおすすめです。")
-            st.text_area("内容", value=text, height=220, key=f"ta_{key}")
+            st.text_area("内容", value=text, height=180, key=f"ta_{key}")
     if not shown:
         st.info("保存済みのAIコメントはまだありません。AIでコメントを作るとここに残ります。")
 
@@ -2093,11 +2092,8 @@ def injury_page(code_hash: str):
             st.error("AIコメントに失敗: " + err)
         else:
             st.session_state["inj_ai_text"] = text
-            st.markdown("#### 🩹 怪我AIコメント（保存されます）")
-            st.text_area("（コピーして共有OK）", value=text, height=220, key="inj_ai_view")
-            copy_button("怪我コメントをコピー", text, key="copy_injury_ai")
-            download_text_button("怪我コメントをTXTで保存", text, filename="injury_ai_comment.txt", key="dl_injury_ai")
-            st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと、翌日以降も見返しやすいです。")
+            ai_highlight_box("🩹 怪我AIコメント（保存されます）", text)
+            st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 # 以前生成したAIコメント（IDに紐づいて復元）
 if st.session_state.get("inj_ai_text"):
     st.markdown("#### 🩹 怪我AIコメント（前回の続き）")
@@ -2162,11 +2158,8 @@ def sleep_page(code_hash: str):
         st.session_state["sl_ai_text"] = out
 
     if st.session_state.get("sl_ai_text"):
-        st.markdown("#### 😴 睡眠AIアドバイス")
-        st.text_area("（コピーして共有OK）", value=st.session_state.get("sl_ai_text",""), height=180, key="sl_ai_view")
-        copy_button("睡眠アドバイスをコピー", st.session_state.get("sl_ai_text",""), key="copy_sleep_advice")
-        download_text_button("睡眠アドバイスをTXTで保存", st.session_state.get("sl_ai_text",""), filename="sleep_ai_advice.txt", key="dl_sleep_advice")
-        st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと振り返りに便利です。")
+        ai_highlight_box("😴 睡眠AIアドバイス（保存されます）", st.session_state.get("sl_ai_text",""))
+        st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
     if st.button("睡眠ログを保存", key="sl_save"):
         save_record(code_hash, "sleep_log",
