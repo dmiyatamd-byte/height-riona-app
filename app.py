@@ -16,7 +16,7 @@ from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_i
 # =========================
 # テスト用（後でSecretsへ移行）
 # =========================
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
+OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
 # =========================
 # Config
@@ -413,6 +413,61 @@ def auto_fill_from_latest_records(code_hash: str):
     st.session_state["_auto_filled"] = True
 
 
+
+# =========================
+# Per-user persistence (basic info & training)
+# =========================
+BASIC_INFO_KEYS = ["name_kana","sex_code","dob","sport"]
+
+def save_basic_info_snapshot(code_hash: str):
+    payload = {k: st.session_state.get(k) for k in BASIC_INFO_KEYS}
+    if isinstance(payload.get("dob"), date):
+        payload["dob"] = payload["dob"].isoformat()
+    save_snapshot(code_hash, "basic_info", payload)
+
+def load_basic_info_snapshot(code_hash: str) -> bool:
+    pl = load_snapshot(code_hash, "basic_info")
+    if not pl:
+        return False
+    if isinstance(pl.get("dob"), str):
+        try:
+            y,m,d = [int(x) for x in pl["dob"].split("-")]
+            pl["dob"] = date(y,m,d)
+        except Exception:
+            pass
+    for k in BASIC_INFO_KEYS:
+        if k in pl and pl[k] is not None:
+            st.session_state[k] = pl[k]
+    # derive age
+    if st.session_state.get("dob"):
+        today = now_jst().date()
+        st.session_state["age_years"] = float(years_between(st.session_state["dob"], today))
+    return True
+
+TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes"]
+
+def save_training_latest(code_hash: str):
+    payload = {k: st.session_state.get(k) for k in TRAINING_KEYS}
+    if isinstance(payload.get("tr_date"), date):
+        payload["tr_date"] = payload["tr_date"].isoformat()
+    save_snapshot(code_hash, "training_latest", payload)
+    save_record(code_hash, "training_log", payload, {"summary":"training_log"})
+
+def load_training_latest(code_hash: str) -> bool:
+    pl = load_snapshot(code_hash, "training_latest")
+    if not pl:
+        return False
+    if isinstance(pl.get("tr_date"), str):
+        try:
+            y,m,d = [int(x) for x in pl["tr_date"].split("-")]
+            pl["tr_date"] = date(y,m,d)
+        except Exception:
+            pass
+    for k in TRAINING_KEYS:
+        if k in pl and pl[k] is not None:
+            st.session_state[k] = pl[k]
+    return True
+
 # =========================
 # Shared demographics
 # =========================
@@ -514,12 +569,33 @@ def shared_demographics():
         st.session_state["dob"] = dob
         st.session_state["age_years"] = float(years_between(dob, today))
         st.caption(f"年齢（概算）：{st.session_state['age_years']:.1f}歳")
+    st.divider()
+    c4, c5 = st.columns([1,1])
+    with c4:
+        if st.button("基本情報を保存", key="basic_save"):
+            try:
+                save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+                st.success("基本情報を保存しました。")
+            except Exception as e:
+                st.error(f"保存に失敗: {e}")
+    with c5:
+        if st.button("基本情報を読み込み", key="basic_load"):
+            try:
+                ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+                if ok:
+                    st.success("基本情報を読み込みました。")
+                    st.rerun()
+                else:
+                    st.info("保存済みの基本情報がありません。")
+            except Exception as e:
+                st.error(f"読み込みに失敗: {e}")
 
 
 # =========================
 # Curve helpers
 # =========================
 @st.cache_data
+
 def load_curve():
     df = pd.read_csv("boys_height_curve.csv")
     df = df.dropna(subset=["age"]).sort_values("age")
@@ -1092,7 +1168,7 @@ def meal_block(prefix: str, title: str, enable_photo: bool):
 
 def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
-    st.caption("朝・昼（給食は写真なし推定）・夕の3つで入力し、1日のPFCを推定します。")
+    st.caption("朝と夕だけで入力し、1日のPFCを推定します（昼は入力不要）。")
 
     sport = st.session_state.get("sport", SPORTS[0])
     age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
@@ -1204,6 +1280,58 @@ def meal_page(code_hash: str):
 def advice_page(code_hash: str):
     st.subheader("🤖 Aiアドバイス")
     sport = st.session_state.get("sport", SPORTS[0])
+
+
+with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
+    st.session_state.setdefault("tr_date", now_jst().date())
+    st.session_state.setdefault("tr_type", "チーム練習")
+    st.session_state.setdefault("tr_duration", 0)
+    st.session_state.setdefault("tr_rpe", 5)
+    st.session_state.setdefault("tr_focus", "")
+    st.session_state.setdefault("tr_notes", "")
+
+    st.date_input("日付", value=st.session_state.get("tr_date"), key="tr_date")
+    st.selectbox("種類", ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","リカバリー","その他"],
+                 index=0, key="tr_type")
+    st.number_input("時間（分）", min_value=0, max_value=600,
+                    value=int(st.session_state.get("tr_duration", 0) or 0),
+                    step=5, key="tr_duration")
+    st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
+    st.text_input("主目的（例：スプリント/当たり負け改善/持久力）", value=st.session_state.get("tr_focus",""), key="tr_focus")
+    st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
+
+    cA, cB, cC = st.columns([1,1,2])
+    with cA:
+        if st.button("保存", key="tr_save"):
+            try:
+                save_training_latest(code_hash)
+                st.success("保存しました。")
+            except Exception as e:
+                st.error(f"保存に失敗: {e}")
+    with cB:
+        if st.button("最新を読み込み", key="tr_load"):
+            try:
+                ok = load_training_latest(code_hash)
+                if ok:
+                    st.success("最新のトレーニングを読み込みました。")
+                    st.rerun()
+                else:
+                    st.info("保存データがありません。")
+            except Exception as e:
+                st.error(f"読み込みに失敗: {e}")
+    with cC:
+        try:
+            hist = load_records(code_hash, limit=30)
+            hist = [h for h in hist if h.get("kind")=="training_log"][:5]
+        except Exception:
+            hist = []
+        if hist:
+            st.caption("直近の保存（最大5件）")
+            for h in hist:
+                pl = h.get("payload") or {}
+                d = pl.get("tr_date","")
+                st.write(f"- {d} / {pl.get('tr_type','')} / {pl.get('tr_duration','')}分 / RPE{pl.get('tr_rpe','')}")
+
 
 
     t1, t2, t3, t4 = st.tabs(["トレーニング", "怪我", "睡眠", "サッカー動画"])
@@ -1407,6 +1535,16 @@ def main():
             return
 
     code_hash = sha256_hex(user)
+
+    # per-user saved data
+    try:
+        load_basic_info_snapshot(code_hash)
+    except Exception:
+        pass
+    try:
+        load_training_latest(code_hash)
+    except Exception:
+        pass
 
     shared_demographics()
     auto_fill_latest_all_tabs(code_hash)
