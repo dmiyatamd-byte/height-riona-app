@@ -1,0 +1,67 @@
+{
+  "models": {
+    "12": {
+      "version": "20251228-110510",
+      "trained_at": 1766887510,
+      "horizon_weeks": 12,
+      "n_train": 1,
+      "features": [
+        "hb0",
+        "tsat0",
+        "ferritin0",
+        "tibc0",
+        "dose",
+        "adherence",
+        "bleed",
+        "inflam"
+      ],
+      "adjustments": {
+        "hb": {
+          "bias": -0.05000000000000071,
+          "weights": {
+            "hb0": 0.0,
+            "tsat0": 0.0,
+            "ferritin0": 0.0,
+            "tibc0": 0.0,
+            "dose": 0.0,
+            "adherence": 0.0,
+            "bleed": 0.0,
+            "inflam": 0.0
+          }
+        },
+        "tsat": {
+          "bias": -1.4797468354430379,
+          "weights": {
+            "hb0": 0.0,
+            "tsat0": 0.0,
+            "ferritin0": 0.0,
+            "tibc0": 0.0,
+            "dose": 0.0,
+            "adherence": 0.0,
+            "bleed": 0.0,
+            "inflam": 0.0
+          }
+        },
+        "ferritin": {
+          "bias": -12.299999999999997,
+          "weights": {
+            "hb0": 0.0,
+            "tsat0": 0.0,
+            "ferritin0": 0.0,
+            "tibc0": 0.0,
+            "dose": 0.0,
+            "adherence": 0.0,
+            "bleed": 0.0,
+            "inflam": 0.0
+          }
+        }
+      },
+      "metrics": {
+        "mae_hb_residual": 0.0,
+        "mae_tsat_residual": 0.0,
+        "mae_ferritin_residual": 0.0,
+        "alpha": 10.0
+      }
+    }
+  }
+}
