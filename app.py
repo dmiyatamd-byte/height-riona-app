@@ -16,7 +16,7 @@ from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_i
 # =========================
 # テスト用（後でSecretsへ移行）
 # =========================
-OPENAI_API_KEY = "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"  # ←ここを自分のsk-...に置き換え
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
 # =========================
 # Config
