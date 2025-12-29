@@ -683,27 +683,24 @@ def shared_demographics():
         st.session_state["age_years"] = float(years_between(dob, today))
         st.caption(f"年齢（概算）：{st.session_state['age_years']:.1f}歳")
     st.divider()
-    c4, c5 = st.columns([1,1])
-    with c4:
-        if st.button("基本情報を保存", key="basic_save"):
-            try:
-                save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-                st.success("基本情報を保存しました。")
-            except Exception as e:
-                st.error(f"保存に失敗: {e}")
-    with c5:
-        if st.button("基本情報を読み込み", key="basic_load"):
-            try:
-                ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-                if ok:
-                    st.success("基本情報を読み込みました。")
-                    st.rerun()
-                else:
-                    st.info("保存済みの基本情報がありません。")
-            except Exception as e:
-                st.error(f"読み込みに失敗: {e}")
+    # --- 基本情報 保存/読込（縦配置） ---
+    if st.button("基本情報を読み込み", key="basic_load"):
+        try:
+            ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+            if ok:
+                st.success("基本情報を読み込みました。")
+                st.rerun()
+            else:
+                st.info("保存済みの基本情報がありません。")
+        except Exception as e:
+            st.error(f"読み込みに失敗: {e}")
 
-
+    if st.button("基本情報を保存", key="basic_save"):
+        try:
+            save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+            st.success("基本情報を保存しました。")
+        except Exception as e:
+            st.error(f"保存に失敗: {e}")
 # =========================
 # Curve helpers
 # =========================
@@ -1387,8 +1384,7 @@ def meal_page(code_hash: str):
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
     # --- 保存/読込（食事ログ）---
-    c1, c2 = st.columns(2)
-    if c1.button("読込", key="meal_load_top"):
+    if st.button("読込", key="meal_load_top"):
         payload = load_snapshot(code_hash, "meal_draft")
         # snapshots に無い場合は records の最新から復元
         if not payload:
@@ -1404,7 +1400,7 @@ def meal_page(code_hash: str):
             st.rerun()
         else:
             st.info("保存データがありません。")
-    if c2.button("保存", key="meal_save_top"):
+    if st.button("保存", key="meal_save_top"):
         keys = [
             "meal_goal", "meal_intensity", "meal_weight",
             "school_lunch", "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
