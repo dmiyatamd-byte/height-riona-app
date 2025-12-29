@@ -488,7 +488,7 @@ def load_training_latest(code_hash: str) -> bool:
     if isinstance(pl.get("tr_date"), str):
         try:
             y,m,d = [int(x) for x in pl["tr_date"].split("-")]
-            pl["tr_date"] = date(y,m,d)e(y,m,d)
+            pl["tr_date"] = date(y, m, d)
         except Exception:
             pass
     for k in TRAINING_KEYS:
