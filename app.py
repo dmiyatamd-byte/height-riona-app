@@ -25,6 +25,7 @@ OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 # Config
 # =========================
 TZ = timezone(timedelta(hours=9))
+JST = TZ  # alias
 SPORTS = ["サッカー", "ラグビー", "野球", "テニス", "水泳"]
 RESERVE_URL = "https://qr.digikar-smart.jp/6bcfb249-1c73-4789-af01-2cb02fec9f42/reserve"
 
@@ -1389,6 +1390,13 @@ def meal_page(code_hash: str):
     c1, c2 = st.columns(2)
     if c1.button("読込", key="meal_load_top"):
         payload = load_snapshot(code_hash, "meal_draft")
+        # snapshots に無い場合は records の最新から復元
+        if not payload:
+            rows = load_records(code_hash, limit=200)
+            for r in rows:
+                if r.get("kind") == "meal_log":
+                    payload = r.get("payload") or {}
+                    break
         if payload:
             for k, v in payload.items():
                 st.session_state[k] = v
@@ -1404,7 +1412,14 @@ def meal_page(code_hash: str):
             "l_c", "l_p", "l_v", "l_dairy", "l_fruit", "l_fried", "l_ai",
             "d_c", "d_p", "d_v", "d_dairy", "d_fruit", "d_fried", "d_ai",
         ]
-        save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
+        payload = {k: st.session_state.get(k) for k in keys}
+        # まずは「最新状態」として snapshots に保存
+        save_snapshot(code_hash, "meal_draft", payload)
+        # さらに日々のログとして records にも積む（翌日でも復元できる）
+        try:
+            save_record(code_hash, "meal_log", payload=payload, result={"date": str(now_jst().date())})
+        except Exception:
+            pass
         st.success("保存しました。")
 
     sport = st.session_state.get("sport", SPORTS[0])
