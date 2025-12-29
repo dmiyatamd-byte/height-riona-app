@@ -72,7 +72,7 @@ def render_login_brand() -> None:
         st.image(p, width=260)
         st.markdown('<div style="height:8px"></div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div style="font-size:52px; line-height:1;">🩺⚽</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:42px; font-weight:700; letter-spacing:0.5px;">JAMS</div>', unsafe_allow_html=True)
 
     st.markdown(
         '<div style="font-size:26px; font-weight:800; margin-top:6px;">プライベートスポーツドクター</div>'
@@ -1640,7 +1640,7 @@ def meal_page(code_hash: str):
         st.success("保存しました。")
 
 
-def advice_page(code_hash: str):
+def advice_page(code_hash: str, mode: str = "all"):
     st.subheader("🏋️ 運動処方 / AIアドバイス")
     st.markdown("""<style>
     /* Make tabs easier to find */
@@ -1866,17 +1866,243 @@ def advice_page(code_hash: str):
         border-radius:12px !important;
     }
     </style>""", unsafe_allow_html=True)
+    # ---- Sections (training / injury / sleep / video) ----
+    def _render_training():
+        st.markdown("### 筋トレメニュー提案")
+        st.caption("体重や筋力の情報から、上半身・下半身・体幹をバランスよく提案します。")
 
+        w = st.number_input("体重（kg）", min_value=20.0, max_value=150.0,
+                            value=float(st.session_state.get("latest_weight_kg", 45.0) or 45.0),
+                            step=0.1, key="tr_weight")
+        st.session_state["latest_weight_kg"] = float(w)
+
+        bench1rm = st.number_input("ベンチプレス最大（推定1回の重さ kg・任意）", min_value=0.0, max_value=300.0,
+                                   value=float(st.session_state.get("tr_bench1rm", 0.0) or 0.0),
+                                   step=0.5, key="tr_bench1rm")
+
+        squat_est = round(w * 1.2, 1)
+        st.caption(f"スクワット（重りを使う場合の目安）: 体重×1.2 ≈ {squat_est} kg（フォーム優先）")
+
+        equipment = st.selectbox("使える器具", ["自重中心（道具なし）", "ダンベル/チューブあり", "バーベル（ベンチ・スクワット可能）"],
+                                 index=0, key="tr_equipment")
+        days = st.selectbox("週あたりの筋トレ日数", [1,2,3,4], index=2, key="tr_days")
+        focus = st.selectbox("筋トレの目的", ["バルクアップ", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_menu_focus")
+
+        if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
+            system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
+            user = f"""競技: {sport}
+        体重: {w} kg
+        ベンチプレス最大(推定1RM): {bench1rm if bench1rm>0 else '不明'} kg
+        スクワット目安: {squat_est} kg（体重から推定）
+        器具: {equipment}
+        週の筋トレ日数: {days}
+        目的: {focus}
+
+        要件:
+        - 上半身/下半身/体幹に分ける
+        - 1回あたり30〜45分
+        - ジュニアなのでフォーム・安全最優先（重すぎない）
+        - 重りが使える場合はベンチプレスやスクワットの「目安重量(kg)」も提案
+        - 自重中心の場合は負荷の上げ方（回数/テンポ/片脚など）を提案
+        - 4週間の進め方（1〜4週の変化）を短く
+        出力は見出し＋箇条書きで。"""
+            text, err = ai_text(system, user)
+            if err:
+                st.error("AI提案に失敗: " + err)
+            else:
+                st.session_state["tr_menu_text"] = text
+                render_menu_blocks(text)
+
+        if st.button("トレーニングログを保存", key="tr_inputs_save"):
+            save_record(code_hash, "training_inputs",
+                        {"sport": sport, "weight": w, "bench1rm": bench1rm, "squat_est": squat_est,
+                         "equipment": equipment, "days": days, "focus": focus},
+                        {"summary": "training_inputs"})
+            st.success("保存しました。")
+
+            # -----------------
+            # 怪我
+            # -----------------
+    
+
+    def _render_injury():
+        st.markdown("### 怪我のチェック")
+        st.caption("痛む場所を選ぶと質問が増えます。最後にAIがコメントします。")
+
+        cols = st.columns(3)
+        locs = []
+        loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "太もも", "ハムストリング", "膝", "足首", "踵/足底"]
+        for i, loc in enumerate(loc_list):
+            with cols[i % 3]:
+                if st.checkbox(loc, key=f"inj_loc_{loc}"):
+                    locs.append(loc)
+
+        pain = st.slider("痛み（0-10）", 0, 10, 0, key="inj_pain")
+        st.caption("例：0=痛みなし / 2-3=違和感 / 4-5=動かすと痛い / 6-7=練習が難しい / 8-10=日常生活もつらい")
+
+        onset = st.selectbox("きっかけ", ["急に（ひねった・ぶつけた・着地で痛い）", "少しずつ（使いすぎ・疲れ）"], index=0, key="inj_onset")
+        swelling = st.checkbox("腫れがある", key="inj_swelling")
+        bruise = st.checkbox("内出血がある", key="inj_bruise")
+        numb = st.checkbox("しびれ・感覚の違和感がある", key="inj_numb")
+        fever = st.checkbox("熱がある", key="inj_fever")
+        weight_bearing = st.selectbox("体重をかけられる？（足の痛みがある場合）", ["問題なし", "少し痛いが可能", "ほぼ無理"], index=0, key="inj_bearing")
+
+        extra = {}
+        if locs:
+            st.markdown("#### 追加の質問（選んだ場所に応じて）")
+            for loc in locs:
+                with st.expander(f"{loc} の追加質問", expanded=False):
+                    if loc in ["膝", "足首", "股関節/鼠径部"]:
+                        extra[f"{loc}_giving_way"] = st.checkbox("踏ん張るとガクっとする/抜ける感じがある", key=f"inj_{loc}_give")
+                        extra[f"{loc}_locking"] = st.checkbox("引っかかる/動かしにくい感じがある", key=f"inj_{loc}_lock")
+                    if loc in ["肩", "肘", "手首/手"]:
+                        extra[f"{loc}_throw"] = st.checkbox("投げる/打つ動作で強く痛む", key=f"inj_{loc}_throw")
+                        extra[f"{loc}_weak"] = st.checkbox("力が入りにくい", key=f"inj_{loc}_weak")
+                    if loc in ["背中/腰"]:
+                        extra[f"{loc}_legpain"] = st.checkbox("脚の方に痛み/しびれが走る", key=f"inj_{loc}_rad")
+                    extra[f"{loc}_worse"] = st.selectbox("一番つらい動き", ["走る", "ジャンプ", "切り返し", "蹴る", "投げる", "日常動作"], index=0, key=f"inj_{loc}_worse")
+
+        st.markdown("### 直ぐにできる対応")
+        st.write("• **痛みの出る動きは行わない**（痛みが出ない範囲での活動に切り替える）")
+        st.write("• **冷やす**：氷や保冷剤をタオルで包んで、10〜15分を1日に数回")
+        st.write("• **押さえる**：腫れているなら、包帯やサポーターで軽く固定（きつすぎない）")
+        st.write("• **高くする**：足のケガなら、座って足をクッションで少し高くする")
+        st.write("• 痛みが強い/腫れが増える/しびれ/体重をかけられない/熱がある時は、早めに相談が安心です。")
+
+        if st.button("AIコメントを出す", type="primary", key="inj_ai"):
+            system = "You are a sports medicine assistant for youth athletes. Output Japanese. Avoid the phrase '受診の目安'. Be kind and clear."
+            user = f"""競技: {sport}
+        痛い場所: {", ".join(locs) if locs else "未選択"}
+        痛みスケール(0-10): {pain}
+        きっかけ: {onset}
+        腫れ: {swelling}
+        内出血: {bruise}
+        しびれ: {numb}
+        熱: {fever}
+        荷重: {weight_bearing}
+        追加情報: {json.dumps(extra, ensure_ascii=False)}
+
+        お願い:
+        - 整形外科医に伝わるように、以下の形式で出力
+          1) まとめ（部位/発症様式/痛みの強さ/腫れ・内出血・しびれ・荷重/悪化動作）
+          2) 考えやすい鑑別（3〜5個、可能性の理由を短く）
+          3) 直ぐにできる対応（冷やし方/固定/痛くない範囲での代替運動）
+          4) 相談を急いだ方がよいサイン（箇条書き）
+        - “受診の目安”という言葉は使わない
+        - 文章は短め、箇条書き中心
+        """
+            text, err = ai_text(system, user)
+            if err:
+                st.error("AIコメントに失敗: " + err)
+            else:
+                st.write(text)
+
+        if st.button("怪我ログを保存", key="inj_save"):
+            save_record(code_hash, "injury_log",
+                        {"sport": sport, "locations": locs, "pain": pain, "onset": onset,
+                         "swelling": swelling, "bruise": bruise, "numb": numb, "fever": fever,
+                         "bearing": weight_bearing, "extra": extra},
+                        {"summary": "injury_log"})
+            st.success("保存しました。")
+
+            # -----------------
+            # 睡眠
+            # -----------------
+    
+
+    def _render_sleep():
+        st.markdown("### 睡眠")
+        wake = st.time_input("起床時刻", value=time(6,0))
+        sleep_h = st.number_input("昨日の睡眠時間（時間）", 0.0, 16.0, 8.0, 0.25)
+        screen = st.number_input("就寝前のスマホ・ゲーム時間（分）", 0, 300, 60, 5)
+        score = 100
+        if sleep_h < 8.0:
+            score -= 20
+        if screen >= 90:
+            score -= 15
+        score = max(0, min(100, score))
+        st.write(f"睡眠スコア（簡易）：{score}/100")
+        # AIによる睡眠アドバイス（任意）
+        if st.button("AIで睡眠アドバイスを作る", key="sl_ai_make"):
+            system = (
+                "You are a sports medicine clinician and youth athlete performance coach. "
+                "Give practical, safe, and actionable sleep advice for a junior soccer athlete. "
+                "Use short Japanese bullets. Avoid long lectures. "
+                "Include: (1) 評価（良い点/課題）, (2) 今日からできる改善3つ, "
+                "(3) 就寝前ルーティン例, (4) 明日の練習/試合に向けたポイント."
+            )
+            user = f"起床時刻: {wake}\n睡眠時間: {sleep_h}時間\n就寝前スクリーン: {screen}分\n睡眠スコア(簡易): {score}/100"
+            out, err = ai_text(system, user)
+            if err:
+                st.error("AIに失敗: " + err)
+                out = (
+                    f"・睡眠時間は{sleep_h}時間。成長期は8〜10時間を目安にしましょう。\n"
+                    f"・就寝前スクリーンは{screen}分。可能なら就寝60分前からオフ。\n"
+                    "・朝は起床後に光を浴び、同じ起床時刻を維持すると整いやすいです。"
+                )
+            st.session_state["sl_ai_text"] = out
+
+        if st.session_state.get("sl_ai_text"):
+            st.markdown("#### 😴 睡眠AIアドバイス")
+            st.text_area("（コピーして共有OK）", value=st.session_state.get("sl_ai_text",""), height=180, key="sl_ai_view")
+            copy_button("睡眠アドバイスをコピー", st.session_state.get("sl_ai_text",""), key="copy_sleep_advice")
+            st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと振り返りに便利です。")
+
+        if st.button("睡眠ログを保存", key="sl_save"):
+            save_record(code_hash, "sleep_log",
+                        {"wake": str(wake), "sleep_h": float(sleep_h), "screen": int(screen), "score": int(score)},
+                        {"summary": "sleep_log"})
+            st.success("保存しました。")
+
+
+
+
+            # -----------------
+            # サッカー動画（YouTube検索）
+            # -----------------
+    
+
+    def _render_video():
+        if sport != "サッカー":
+            st.caption("このタブはサッカー選手向けです。競技がサッカーの場合に使ってください。")
+        else:
+            st.markdown("### やりたいプレーからおすすめ動画")
+            st.caption("例：裏抜け / 1対1突破 / ハーフスペースの受け方 / ビルドアップ / 守備の間合い / カウンターの判断 など")
+            style = st.text_area("やりたいプレー・課題（できるだけ具体的に）", height=120, key="soccer_style")
+            if st.button("おすすめ動画リンクを作る", type="primary", key="soccer_make_links"):
+                system = "You are a soccer coach. Produce 5 Japanese YouTube search queries. Output one per line, no extra text."
+                user = f"テーマ: {style}"
+                text, err = ai_text(system, user)
+                if err:
+                    st.error("AIに失敗: " + err)
+                else:
+                    queries = [q.strip("-• 	") for q in (text or "").splitlines() if q.strip()]
+                    st.markdown("#### YouTube検索リンク")
+                    import urllib.parse
+                    for q in queries[:5]:
+                        url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
+                        st.markdown(f"- [{q}]({url})")
+
+    if mode == "training":
+        _render_training()
+        return
+    if mode == "injury":
+        _render_injury()
+        return
+    if mode == "sleep":
+        _render_sleep()
+        return
+    if mode == "video":
+        _render_video()
+        return
+
+    # Default: show as tabs
     labels = ["🏋️ トレーニング", "🩹 怪我", "😴 睡眠", "🎥 サッカー動画"]
     preferred = st.session_state.get("advice_tab_pref", labels[0])
     if preferred in labels:
         labels = [preferred] + [x for x in labels if x != preferred]
     t1, t2, t3, t4 = st.tabs(labels)
 
-
-    # -----------------
-    # トレーニング
-    # -----------------
     with t1:
         st.markdown("### 筋トレメニュー提案")
         st.caption("体重や筋力の情報から、上半身・下半身・体幹をバランスよく提案します。")
@@ -1901,21 +2127,21 @@ def advice_page(code_hash: str):
         if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
             system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
             user = f"""競技: {sport}
-体重: {w} kg
-ベンチプレス最大(推定1RM): {bench1rm if bench1rm>0 else '不明'} kg
-スクワット目安: {squat_est} kg（体重から推定）
-器具: {equipment}
-週の筋トレ日数: {days}
-目的: {focus}
+        体重: {w} kg
+        ベンチプレス最大(推定1RM): {bench1rm if bench1rm>0 else '不明'} kg
+        スクワット目安: {squat_est} kg（体重から推定）
+        器具: {equipment}
+        週の筋トレ日数: {days}
+        目的: {focus}
 
-要件:
-- 上半身/下半身/体幹に分ける
-- 1回あたり30〜45分
-- ジュニアなのでフォーム・安全最優先（重すぎない）
-- 重りが使える場合はベンチプレスやスクワットの「目安重量(kg)」も提案
-- 自重中心の場合は負荷の上げ方（回数/テンポ/片脚など）を提案
-- 4週間の進め方（1〜4週の変化）を短く
-出力は見出し＋箇条書きで。"""
+        要件:
+        - 上半身/下半身/体幹に分ける
+        - 1回あたり30〜45分
+        - ジュニアなのでフォーム・安全最優先（重すぎない）
+        - 重りが使える場合はベンチプレスやスクワットの「目安重量(kg)」も提案
+        - 自重中心の場合は負荷の上げ方（回数/テンポ/片脚など）を提案
+        - 4週間の進め方（1〜4週の変化）を短く
+        出力は見出し＋箇条書きで。"""
             text, err = ai_text(system, user)
             if err:
                 st.error("AI提案に失敗: " + err)
@@ -1930,9 +2156,10 @@ def advice_page(code_hash: str):
                         {"summary": "training_inputs"})
             st.success("保存しました。")
 
-    # -----------------
-    # 怪我
-    # -----------------
+            # -----------------
+            # 怪我
+            # -----------------
+    
     with t2:
         st.markdown("### 怪我のチェック")
         st.caption("痛む場所を選ぶと質問が増えます。最後にAIがコメントします。")
@@ -1980,25 +2207,25 @@ def advice_page(code_hash: str):
         if st.button("AIコメントを出す", type="primary", key="inj_ai"):
             system = "You are a sports medicine assistant for youth athletes. Output Japanese. Avoid the phrase '受診の目安'. Be kind and clear."
             user = f"""競技: {sport}
-痛い場所: {", ".join(locs) if locs else "未選択"}
-痛みスケール(0-10): {pain}
-きっかけ: {onset}
-腫れ: {swelling}
-内出血: {bruise}
-しびれ: {numb}
-熱: {fever}
-荷重: {weight_bearing}
-追加情報: {json.dumps(extra, ensure_ascii=False)}
+        痛い場所: {", ".join(locs) if locs else "未選択"}
+        痛みスケール(0-10): {pain}
+        きっかけ: {onset}
+        腫れ: {swelling}
+        内出血: {bruise}
+        しびれ: {numb}
+        熱: {fever}
+        荷重: {weight_bearing}
+        追加情報: {json.dumps(extra, ensure_ascii=False)}
 
-お願い:
-- 整形外科医に伝わるように、以下の形式で出力
-  1) まとめ（部位/発症様式/痛みの強さ/腫れ・内出血・しびれ・荷重/悪化動作）
-  2) 考えやすい鑑別（3〜5個、可能性の理由を短く）
-  3) 直ぐにできる対応（冷やし方/固定/痛くない範囲での代替運動）
-  4) 相談を急いだ方がよいサイン（箇条書き）
-- “受診の目安”という言葉は使わない
-- 文章は短め、箇条書き中心
-"""
+        お願い:
+        - 整形外科医に伝わるように、以下の形式で出力
+          1) まとめ（部位/発症様式/痛みの強さ/腫れ・内出血・しびれ・荷重/悪化動作）
+          2) 考えやすい鑑別（3〜5個、可能性の理由を短く）
+          3) 直ぐにできる対応（冷やし方/固定/痛くない範囲での代替運動）
+          4) 相談を急いだ方がよいサイン（箇条書き）
+        - “受診の目安”という言葉は使わない
+        - 文章は短め、箇条書き中心
+        """
             text, err = ai_text(system, user)
             if err:
                 st.error("AIコメントに失敗: " + err)
@@ -2013,9 +2240,10 @@ def advice_page(code_hash: str):
                         {"summary": "injury_log"})
             st.success("保存しました。")
 
-    # -----------------
-    # 睡眠
-    # -----------------
+            # -----------------
+            # 睡眠
+            # -----------------
+    
     with t3:
         st.markdown("### 睡眠")
         wake = st.time_input("起床時刻", value=time(6,0))
@@ -2063,9 +2291,10 @@ def advice_page(code_hash: str):
 
 
 
-    # -----------------
-    # サッカー動画（YouTube検索）
-    # -----------------
+            # -----------------
+            # サッカー動画（YouTube検索）
+            # -----------------
+    
     with t4:
         if sport != "サッカー":
             st.caption("このタブはサッカー選手向けです。競技がサッカーの場合に使ってください。")
@@ -2116,6 +2345,8 @@ def main():
     auto_fill_latest_all_tabs(code_hash)
     auto_fill_from_latest_records(code_hash)
 
+    set_jams_background(opacity=0.05)
+
     st.markdown("### 画面選択")
     with st.sidebar:
         st.markdown("### ページ")
@@ -2127,8 +2358,7 @@ def main():
         )
 
     if nav == "運動処方":
-        st.session_state["advice_tab_pref"] = "🏋️ トレーニング"
-        advice_page(code_hash)
+        advice_page(code_hash, mode="training")
     elif nav == "食事管理":
         meal_page(code_hash)
     elif nav == "身長予測":
@@ -2136,17 +2366,13 @@ def main():
     elif nav == "スポーツ貧血":
         anemia_page(code_hash)
     elif nav == "怪我":
-        st.session_state["advice_tab_pref"] = "🩹 怪我"
-        advice_page(code_hash)
+        advice_page(code_hash, mode="injury")
     elif nav == "睡眠":
-        st.session_state["advice_tab_pref"] = "😴 睡眠"
-        advice_page(code_hash)
+        advice_page(code_hash, mode="sleep")
     elif nav == "サッカー動画":
-        st.session_state["advice_tab_pref"] = "🎥 サッカー動画"
-        advice_page(code_hash)
+        advice_page(code_hash, mode="video")
     else:
-        st.session_state["advice_tab_pref"] = "🏋️ トレーニング"
-        advice_page(code_hash)
+        advice_page(code_hash, mode="training")
 
 if __name__ == "__main__":
     main()
