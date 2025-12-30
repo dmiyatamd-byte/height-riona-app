@@ -2406,8 +2406,15 @@ def profile_top_page(code_hash: str):
         except Exception:
             _b_date = _dt.date(2010,1,1)
         birth = st.date_input("生年月日", value=_b_date, key="pf_birth")
-        height_cm = st.number_input("身長（cm）", min_value=50.0, max_value=230.0, value=float(prof.get("height_cm") or 0.0), step=0.1, key="pf_height")
-        weight_kg = st.number_input("体重（kg）", min_value=10.0, max_value=200.0, value=float(prof.get("weight_kg") or 0.0), step=0.1, key="pf_weight")
+        _h0 = float(prof.get("height_cm") or 0.0)
+        _w0 = float(prof.get("weight_kg") or 0.0)
+        if _h0 < 50.0:
+            _h0 = 150.0
+        if _w0 < 10.0:
+            _w0 = 40.0
+
+        height_cm = st.number_input("身長（cm）", min_value=50.0, max_value=230.0, value=_h0, step=0.1, key="pf_height")
+        weight_kg = st.number_input("体重（kg）", min_value=10.0, max_value=200.0, value=_w0, step=0.1, key="pf_weight")
 
         st.markdown('<div class="km-muted">※入力後は自動保存され、リセットしない限りこの情報で進みます。</div>', unsafe_allow_html=True)
 
