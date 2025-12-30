@@ -15,55 +15,6 @@ import numpy as np
 import calendar
 import altair as alt
 
-def _uploaded_image_to_jpeg_bytes(up) -> tuple:
-    """Return (jpeg_bytes, err). Accepts jpg/png/heic/heif if possible."""
-    if up is None:
-        return None, "no file"
-    try:
-        data = up.getvalue()
-    except Exception:
-        try:
-            data = up.read()
-        except Exception:
-            return None, "画像データを読み取れませんでした。"
-
-    name = (getattr(up, "name", "") or "").lower()
-    mime = (getattr(up, "type", "") or "").lower()
-
-    if ("jpeg" in mime) or name.endswith((".jpg", ".jpeg")):
-        return data, None
-
-    try:
-        from PIL import Image
-        import io
-
-        # HEIC/HEIF
-        if ("heic" in mime) or ("heif" in mime) or name.endswith((".heic", ".heif")):
-            try:
-                import pillow_heif  # type: ignore
-                pillow_heif.register_heif_opener()
-            except Exception:
-                return None, "iPhoneのHEIC画像です。サーバ側で変換できないため、iPhone設定→カメラ→フォーマットを『互換性優先』にするか、PNG/JPEGでアップロードしてください。"
-
-        img = Image.open(io.BytesIO(data))
-        img = img.convert("RGB")
-        # 軽量化：最大辺1024
-        max_side = 1024
-        w, h = img.size
-        if max(w, h) > max_side:
-            if w >= h:
-                nw = max_side
-                nh = int(h * (max_side / w))
-            else:
-                nh = max_side
-                nw = int(w * (max_side / h))
-            img = img.resize((nw, nh))
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=88, optimize=True)
-        return out.getvalue(), None
-    except Exception as e:
-        return None, f"画像の変換に失敗しました: {e}"
-
 from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_id, simulate_predictions_for_case
 
 # =========================
@@ -307,6 +258,20 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(1):has(input:ch
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(2):has(input:checked){ background: rgba(239,68,68,0.10) !important; outline-color: rgba(239,68,68,0.35) !important; }
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(3):has(input:checked){ background: rgba(16,185,129,0.10) !important; outline-color: rgba(16,185,129,0.35) !important; }
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:checked){ background: rgba(245,158,11,0.12) !important; outline-color: rgba(245,158,11,0.40) !important; }
+
+
+/* === Mobile menu (Calomil-ish) === */
+.km-wrap{max-width:760px;margin:0 auto;}
+.km-card{border:1px solid rgba(0,0,0,0.08); border-radius:16px; padding:12px 14px; background:rgba(255,255,255,0.92); box-shadow:0 1px 6px rgba(0,0,0,0.04);}
+.km-muted{color:rgba(0,0,0,0.55); font-size:0.85rem;}
+.km-title{font-weight:700; font-size:1.05rem; margin:0 0 6px 0;}
+.km-grid button[kind="secondary"], .km-grid button[kind="primary"]{width:100%;}
+.km-bigbtn button{height:64px !important; border-radius:16px !important; font-weight:700 !important;}
+.km-bigbtn .stButton>button{width:100%;}
+.km-topbar{display:flex; gap:8px; align-items:center; justify-content:space-between; margin:8px 0 14px;}
+.km-navbtn .stButton>button{border-radius:14px; padding:10px 12px; width:100%;}
+.km-bottom{position:sticky; bottom:0; z-index:10; padding:10px 0 8px 0; background:linear-gradient(to top, rgba(255,255,255,0.98), rgba(255,255,255,0.65), rgba(255,255,255,0));}
+.km-thumb img{border-radius:12px !important;}
 
 </style>
     """, unsafe_allow_html=True)
@@ -1086,27 +1051,12 @@ def openai_client():
         return None, str(e)
 
 def analyze_meal_photo(img_bytes: bytes, meal_type: str):
-    """
-    画像が「食事写真」かどうかをまず判定し、食事でなければ解析を中断する。
-    ※食事でない画像（PC電源、風景、書類など）でもそれっぽい推定を返してしまうのを防ぐため。
-    """
     client, err = openai_client()
     if err:
         return None, err
-
-    prompt = f"""あなたはスポーツ栄養のアシスタントです。
-次の画像が「{meal_type}の食事写真」かどうかを最初に判定してください。
-
-- 食事写真だと判断できる場合: is_food=true として、食品群の量感を Aレベル（少/普/多）で推定してください。
-- 食事写真ではない / 判定不能な場合: is_food=false とし、reason を短く説明してください（例: '機器の写真に見える' など）。
-- 無理に推定しないでください。迷う場合は is_food=false にしてください。
-
-JSONのみで返してください（余計な文章は禁止）。
-キー:
-is_food(true/false), reason,
-carb, protein, veg, fat (各 '少'/'普'/'多' か '不明'),
-fried_or_oily(true/false), dairy(true/false), fruit(true/false),
-confidence(0-1)
+    prompt = f"""これは{meal_type}の食事写真です。
+食品群の量感を Aレベル（少/普/多）で推定し、JSONのみで返してください。
+キー: carb, protein, veg, fat, fried_or_oily(true/false), dairy(true/false), fruit(true/false), confidence(0-1)
 """
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     try:
@@ -1122,38 +1072,21 @@ confidence(0-1)
         txt = (resp.output_text or "").strip()
         if not txt:
             return None, "解析結果が空でした。"
-
         data = json.loads(txt)
-
-        is_food = bool(data.get("is_food", False))
-        conf = float(data.get("confidence", 0.0) or 0.0)
-        reason = (data.get("reason") or "").strip()
-
-        # 食事でない可能性が高い場合は中断
-        if (not is_food) or conf < 0.35:
-            msg = "食事写真として判定できませんでした。"
-            if reason:
-                msg += f"（理由: {reason}）"
-            msg += " 食事が写っている写真で、明るく・料理全体が入るように撮影して再度お試しください。"
-            return None, msg
-
-        def norm(v):
-            return v if v in ["少", "普", "多"] else ("不明" if v == "不明" else "普")
-
+        def norm(v): return v if v in ["少","普","多"] else "普"
         out = {
-            "carb": norm(data.get("carb", "普")),
-            "protein": norm(data.get("protein", "普")),
-            "veg": norm(data.get("veg", "普")),
-            "fat": norm(data.get("fat", "普")),
+            "carb": norm(data.get("carb","普")),
+            "protein": norm(data.get("protein","普")),
+            "veg": norm(data.get("veg","普")),
+            "fat": norm(data.get("fat","普")),
             "fried_or_oily": bool(data.get("fried_or_oily", False)),
             "dairy": bool(data.get("dairy", False)),
             "fruit": bool(data.get("fruit", False)),
-            "confidence": conf,
+            "confidence": float(data.get("confidence", 0.0) or 0.0),
         }
         return out, None
     except Exception as e:
         return None, str(e)
-
 
 def ai_text(system: str, user: str):
     client, err = openai_client()
@@ -1616,162 +1549,100 @@ def eval_ratio(actual: float, target: float) -> str:
 
 
 
-def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict, show_title: bool = True, show_thumbs: bool = True):
+def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
     """
-    食事1回分の入力（スマホ優先）
-    - 基本：写真（カメラ/アルバム）→AI解析
-    - 写真が無理 / 伝わらない時だけ「量を記入（手入力）」を開く（隠しUI）
-    - 写真は上書きではなく追加（最新3枚を保持）
+    食事1回分の入力（チェック式 + 写真AI）
+    prefix: "b"/"l"/"d"
     """
-    if show_title:
-        st.markdown(f"#### {title}")
+    st.markdown(f"#### {title}")
 
-    # state
     ai = st.session_state.get(f"{prefix}_ai")
-    photos_key = f"{prefix}_photos"
-    st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
-    manual_key = f"{prefix}_manual_open"
-    st.session_state.setdefault(manual_key, False)
-
-    # --- 写真（折りたたみで場所を取らない）---
     if enable_photo:
-        with st.expander("📸 写真を追加／解析", expanded=False):
-            up = st.file_uploader(
-                "写真を追加（カメラ/アルバム）",
-                type=["jpg", "jpeg", "png", "heic", "heif"],
-                accept_multiple_files=False,
-                key=f"{prefix}_uploader_one"
-            )
-            if up is not None:
-                img_bytes, err = _uploaded_image_to_jpeg_bytes(up)
+        up = st.file_uploader(f"{title}の写真（任意）", type=["jpg","jpeg","png"], key=f"{prefix}_photo")
+        if up is not None:
+            img_bytes = up.getvalue()
+            st.image(up, caption="アップロード画像", use_container_width=True)
+
+            if st.button("AIで推論（少/普/多）", key=f"{prefix}_ai_btn"):
+                out, err = analyze_meal_photo(img_bytes, title)
                 if err:
-                    st.error(err)
+                    st.error("写真解析に失敗: " + err)
+                    ai = None
+                    st.session_state.pop(f"{prefix}_comment", None)
+                    st.session_state.pop(f"{prefix}_score", None)
+                    st.session_state.pop(f"{prefix}_status", None)
+                    st.session_state.pop(f"{prefix}_bullets", None)
                 else:
-                    # 追加（履歴）
-                    c_add, c_ai = st.columns(2)
-                    if c_add.button("写真を追加", key=f"{prefix}_add_photo"):
-                        b64 = base64.b64encode(img_bytes).decode("utf-8")
-                        st.session_state[photos_key].append({"ts": datetime.now().isoformat(timespec="seconds"), "b64": b64})
-                        st.session_state[photos_key] = st.session_state[photos_key][-3:]  # keep latest 3
-                        st.success("追加しました。")
-                        st.rerun()
+                    ai = out
+                    st.session_state[f"{prefix}_ai"] = ai
 
-                    if c_ai.button("AIで食事を解析", key=f"{prefix}_ai_btn"):
-                        out, err2 = analyze_meal_photo(img_bytes, title)
-                        if err2:
-                            st.error("写真解析に失敗: " + err2)
-                            st.session_state.pop(f"{prefix}_ai", None)
-                            st.session_state.pop(f"{prefix}_comment", None)
-                            st.session_state.pop(f"{prefix}_score", None)
-                            st.session_state.pop(f"{prefix}_status", None)
-                            st.session_state.pop(f"{prefix}_bullets", None)
-                            ai = None
-                        else:
-                            ai = out
-                            st.session_state[f"{prefix}_ai"] = ai
+                    # estimate + rating
+                    est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                                        bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
+                    score, status, bullets = rate_meal(prefix, est, targets)
+                    st.session_state[f"{prefix}_score"] = score
+                    st.session_state[f"{prefix}_status"] = status
+                    st.session_state[f"{prefix}_bullets"] = bullets
 
-                            # estimate + rating
-                            est_tmp = meal_estimate(
-                                ai.get("carb","普"),
-                                ai.get("protein","普"),
-                                ai.get("veg","普"),
-                                bool(ai.get("fried_or_oily", False)),
-                                bool(ai.get("dairy", False)),
-                                bool(ai.get("fruit", False))
-                            )
-                            score, status, bullets = rate_meal(prefix, est_tmp, targets)
-                            st.session_state[f"{prefix}_score"] = score
-                            st.session_state[f"{prefix}_status"] = status
-                            st.session_state[f"{prefix}_bullets"] = bullets
-
-                            # 寸評（失敗時は bullets）
-                            system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
-                            user = f"""{title}の食事推定（主食/主菜/野菜/脂質/乳製品/果物）からPFCとkcalを推定しました。
-推定: kcal={est_tmp['kcal']:.0f}, P={est_tmp['p']:.0f}g, C={est_tmp['c']:.0f}g, F={est_tmp['f']:.0f}g
+                    # AI寸評（失敗時は簡易）
+                    system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
+                    user = f"""{title}の写真推論（主食/主菜/野菜/脂質/乳製品/果物）からPFCとkcalを推定しました。
+推定: kcal={est['kcal']:.0f}, P={est['p']:.0f}g, C={est['c']:.0f}g, F={est['f']:.0f}g
 1日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
-この{title}について、朝昼夕の配分も踏まえて改善点を短い寸評（100〜140字）で書いてください。出力は寸評のみ。"""
-                            comment, e3 = ai_text(system, user)
-                            if e3 or not comment:
-                                comment = " / ".join(bullets) if bullets else ""
-                            st.session_state[f"{prefix}_comment"] = (comment or "").strip()
+この{title}は朝昼夕の配分を考えると、今の量が適切か、改善点を短い寸評（100〜140字）で書いてください。
+出力は寸評のみ。"""
+                    comment, e2 = ai_text(system, user)
+                    if e2 or not comment:
+                        comment = " / ".join(bullets)
+                    st.session_state[f"{prefix}_comment"] = comment.strip()
 
-                            st.success("解析しました。")
-                            st.rerun()
+                    st.success("推論が完了しました。")
 
-    # --- サムネ表示（常時：小さく）---
-    if show_thumbs:
-        photos = st.session_state.get(photos_key, [])
-        if photos:
-            st.caption("保存済み（最新3枚）")
-            cols = st.columns(min(3, len(photos)))
-            for i, item in enumerate(reversed(photos[-3:])):
-                b64 = item.get("b64", "")
-                data_url = "data:image/jpeg;base64," + b64
-                with cols[i]:
-                    try:
-                        st.image(base64.b64decode(b64), width=120)
-                    except Exception:
-                        st.write("画像")
-                    st.markdown(
-                        f'<a href="{data_url}" target="_blank" rel="noopener noreferrer">画像を開く</a>',
-                        unsafe_allow_html=True
-                    )
+        if ai:
+            st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')} (信頼度 {ai.get('confidence',0):.2f})")
 
-
-    if ai:
-        st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')}（信頼度 {ai.get('confidence',0):.2f}）")
-
-    # --- 手入力（隠しUI）---
-    if st.button("写真がとれない／伝わらないとき（量を記入）", key=f"{prefix}_open_manual"):
-        st.session_state[manual_key] = True
-        st.rerun()
-
-    c_level = p_level = v_level = "普"
-    dairy = fruit = fried = False
-    if st.session_state.get(manual_key):
-        with st.expander("量の記入（必要なときだけ）", expanded=True):
-            c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
-            p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
-            v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
-            dairy = st.checkbox("乳製品あり", value=False, key=f"{prefix}_dairy")
-            fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
-            fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
+    # 手入力（AIが無い/微調整用）
+    c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
+    p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
+    v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
+    dairy = st.checkbox("乳製品あり", value=False, key=f"{prefix}_dairy")
+    fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
+    fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
 
     # 推定（AIがあればAI優先）
     if ai:
-        est = meal_estimate(
-            ai.get("carb","普"),
-            ai.get("protein","普"),
-            ai.get("veg","普"),
-            bool(ai.get("fried_or_oily", False)),
-            bool(ai.get("dairy", False)),
-            bool(ai.get("fruit", False))
-        )
+        est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                            bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
     else:
         est = meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
 
-    # 点数・評価・寸評
+    # 表示（点数・栄養評価・寸評）
     score = st.session_state.get(f"{prefix}_score")
     status = st.session_state.get(f"{prefix}_status")
     bullets = st.session_state.get(f"{prefix}_bullets") or []
-    comment = st.session_state.get(f"{prefix}_comment") or ""
+    comment = st.session_state.get(f"{prefix}_comment")
+
+    st.markdown("##### 推定PFC / kcal")
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("P", f"{est['p']:.0f} g")
+    m2.metric("C", f"{est['c']:.0f} g")
+    m3.metric("F", f"{est['f']:.0f} g")
+    m4.metric("kcal", f"{est['kcal']:.0f}")
 
     if score is None or status is None:
-        score, status, bullets = rate_meal(prefix, est, targets)
-        st.session_state[f"{prefix}_score"] = score
-        st.session_state[f"{prefix}_status"] = status
-        st.session_state[f"{prefix}_bullets"] = bullets
+        # AI推論前でも評価は出す（手入力ベース）
+        s2, st2, bl2 = rate_meal(prefix, est, targets)
+        score, status, bullets = s2, st2, bl2
 
-    st.markdown(f"**この食事の推定**：{est['kcal']:.0f} kcal / P {est['p']:.0f} g / C {est['c']:.0f} g / F {est['f']:.0f} g")
-    st.markdown(f"**評価**：**{int(score)} / 100**（{status}）")
+    st.markdown(f"##### {title}スコア：**{int(score)} / 100**（{status}）")
     if bullets:
-        st.write("・" + "\n・".join(bullets))
+        for b in bullets:
+            st.write("・" + b)
     if comment:
         st.markdown("##### 寸評")
         st.write(comment)
 
     return est
-
 def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
@@ -1817,7 +1688,7 @@ def meal_page(code_hash: str):
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
     top = st.columns(4)
-    goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
+    goal = top[0].selectbox("目的", ["増量","維持","回復"], index=1, key="meal_goal")
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
     weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
@@ -1832,126 +1703,65 @@ def meal_page(code_hash: str):
     t3.metric("脂質", f"{targets['f_g']:.0f} g")
     t4.metric("総カロリー", f"{targets['kcal']:.0f} kcal")
 
-    if goal == "ダイエット":
-        st.info("ダイエット：-2kg/月（目安）に合わせ、維持推定から約-500kcal/日を基準に調整しています。成長期のため、極端な制限にならないよう下限を設定しています。")
 
+    with st.expander("朝食", expanded=True):
+        b = meal_block("b", "朝食", True, targets)
 
+    # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
+    with st.expander("昼食", expanded=False):
+        st.markdown("#### 昼食")
+        is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
+        if is_school:
+            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。メニューが分かれば入力してください。")
+            menu = st.text_area("メニュー（分かる範囲で）", key="l_menu", placeholder="例：ごはん、鶏の照り焼き、みそ汁、牛乳…")
+            lk = st.number_input("推定カロリー（kcal）", 0.0, 2000.0, value=650.0, step=10.0, key="l_kcal_simple")
+            lp = st.number_input("たんぱく質（g）", 0.0, 200.0, value=25.0, step=1.0, key="l_p_simple")
+            lc = st.number_input("炭水化物（g）", 0.0, 400.0, value=90.0, step=1.0, key="l_c_simple")
+            lf = st.number_input("脂質（g）", 0.0, 200.0, value=18.0, step=1.0, key="l_f_simple")
+            l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
+        else:
+            st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
+            l = meal_block("l", "昼食", True, targets)
+            l["mode"] = "normal"
 
-    
-    st.markdown("### 今日の記録")
+        # 昼食のAIコメント（しっかり）
+        if st.button("昼食のAIコメント（しっかり）", key="l_ai_comment_btn"):
+            # 目標との差分を昼の一言に落とす
+            targets_local = targets  # meal_page内のtargetsを参照
+            # ここでは昼食単体と、昼までの累計でコメントを作る
+            p_l = float(l.get("p", 0.0) or 0.0)
+            c_l = float(l.get("c", 0.0) or 0.0)
+            f_l = float(l.get("f", 0.0) or 0.0)
+            k_l = float(l.get("kcal", 0.0) or 0.0)
+            menu_txt = l.get("menu", "") if isinstance(l, dict) else ""
+            system = "You are a sports nutrition coach for junior athletes. Output Japanese. Be specific with grams/portions. No long preface."
+            user = f"""目的: {goal}
+運動強度: {intensity}
+体重: {weight} kg
+1日の目標: kcal={targets_local['kcal']:.0f}, C={targets_local['c_g']:.0f}g, P={targets_local['p_g']:.0f}g, F={targets_local['f_g']:.0f}g
 
-    def _meal_est_from_state(prefix: str):
-        # 給食モードの昼食は別管理
-        if prefix == "l" and st.session_state.get("l_is_school", True):
-            return {
-                "kcal": float(st.session_state.get("l_school_kcal", 0.0)),
-                "p": float(st.session_state.get("l_school_p", 0.0)),
-                "c": float(st.session_state.get("l_school_c", 0.0)),
-                "f": float(st.session_state.get("l_school_f", 0.0)),
-            }
-        ai = st.session_state.get(f"{prefix}_ai") or {}
-        c_level = ai.get("carb") or st.session_state.get(f"{prefix}_c", "普")
-        p_level = ai.get("protein") or st.session_state.get(f"{prefix}_p", "普")
-        v_level = ai.get("veg") or st.session_state.get(f"{prefix}_v", "普")
-        fried = bool(ai.get("fried_or_oily", st.session_state.get(f"{prefix}_fried", False)))
-        dairy = bool(ai.get("dairy", st.session_state.get(f"{prefix}_dairy", False)))
-        fruit = bool(ai.get("fruit", st.session_state.get(f"{prefix}_fruit", False)))
-        return meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
-
-    def _latest_photo(prefix: str):
-        photos = st.session_state.get(f"{prefix}_photos", []) or []
-        if not photos:
-            return None
-        return photos[-1].get("b64") or None
-
-    def _thumb_cell(prefix: str):
-        b64 = _latest_photo(prefix)
-        if not b64:
-            st.markdown("<div style='font-size:28px; line-height:1; padding-top:6px;'>📷</div>", unsafe_allow_html=True)
-            st.caption("写真なし")
-            return
-        try:
-            st.image(base64.b64decode(b64), width=64)
-        except Exception:
-            st.write("画像")
-        data_url = "data:image/jpeg;base64," + b64
-        st.markdown(
-            f'<a href="{data_url}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">開く</a>',
-            unsafe_allow_html=True
-        )
-
-    def _chips(est: dict):
-        # 小さめチップ表示
-        st.markdown(
-            f"""<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
-            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">P {est.get('p',0):.0f}g</span>
-            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">C {est.get('c',0):.0f}g</span>
-            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">F {est.get('f',0):.0f}g</span>
-            </div>""",
-            unsafe_allow_html=True
-        )
-
-    def render_meal_card(prefix: str, title: str, expanded: bool = False):
-        est_preview = _meal_est_from_state(prefix)
-        with st.container(border=True):
-            c1, c2 = st.columns([1, 3])
-            with c1:
-                _thumb_cell(prefix)
-            with c2:
-                st.markdown(f"**{title}**")
-                st.markdown(f"<div style='font-size:20px; font-weight:700; margin-top:-2px;'>{est_preview.get('kcal',0):.0f} kcal</div>", unsafe_allow_html=True)
-                _chips(est_preview)
-
-            with st.expander("記録を追加・修正", expanded=expanded):
-                if prefix == "l":
-                    st.markdown("#### 昼食")
-                    is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
-                    if is_school:
-                        # 給食は簡易：目標の1/3〜0.4相当を目安に入力（ざっくり）
-                        default_k = float(targets.get("kcal", 0)) * 0.35
-                        k_l = st.number_input("給食カロリー（推定）", 0.0, 2000.0, value=float(st.session_state.get("l_school_kcal", default_k)), step=10.0, key="l_school_kcal")
-                        p_l = st.number_input("たんぱく質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_p", targets.get("p_g",0)*0.30)), step=1.0, key="l_school_p")
-                        c_l = st.number_input("炭水化物（g）", 0.0, 400.0, value=float(st.session_state.get("l_school_c", targets.get("c_g",0)*0.35)), step=1.0, key="l_school_c")
-                        f_l = st.number_input("脂質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_f", targets.get("f_g",0)*0.35)), step=1.0, key="l_school_f")
-                                                                        
-                        if st.button("AIで昼食コメント", key="l_ai_comment_btn"):
-                            system = "あなたはスポーツ栄養の専門家です。日本語で簡潔に。"
-                            menu_txt = st.text_input("給食メニュー（分かる範囲で）", value=st.session_state.get("l_school_menu",""), key="l_school_menu")
-                            user = f"""昼食（給食）:
+昼食（推定）:
 - kcal: {k_l:.0f}
 - C/P/F: {c_l:.0f}g / {p_l:.0f}g / {f_l:.0f}g
-- メニュー: {menu_txt if menu_txt else "不明"}
-今日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
+- メニュー: {menu_txt if menu_txt else "不明（写真/入力ベース）"}
 お願い:
-- 昼食の良い点/改善点を短く
-- 夕食での帳尻合わせを具体量で提案（ごはん何g、肉/魚何gなど）
-- 文章は見出し＋箇条書き中心で読みやすく
+- 昼食の評価（良い点/改善点）を短く
+- 今日は“夕食でどう帳尻を合わせるか”を具体量で提案（例：ごはん何g、肉/魚何g、牛乳/ヨーグルト量）
+- もし不足が大きければ、間食案（1〜2個）も提案（コンビニで買えるレベル）
+- 文章は見出し＋箇条書き中心で、読みやすく
 """
-                            text, err = ai_text(system, user)
-                            if err:
-                                st.error("AIコメントに失敗: " + err)
-                            else:
-                                st.session_state["l_ai_comment_text"] = text
+            text, err = ai_text(system, user)
+            if err:
+                st.error("AIコメントに失敗: " + err)
+            else:
+                st.session_state["l_ai_comment_text"] = text
+        if st.session_state.get("l_ai_comment_text"):
+            ai_highlight_box("昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
 
-                        if st.session_state.get("l_ai_comment_text"):
-                            st.markdown("##### AIコメント")
-                            st.write(st.session_state.get("l_ai_comment_text"))
-                        # 給食モードはここで完了
-                        return {"kcal": float(k_l), "p": float(p_l), "c": float(c_l), "f": float(f_l)}
-                    else:
-                        est = meal_block("l", "昼食", True, targets, show_title=False, show_thumbs=True)
-                        return est
+    with st.expander("夕食", expanded=True):
 
-                est = meal_block(prefix, title, True, targets, show_title=False, show_thumbs=True)
-                return est
+        d = meal_block("d", "夕食", True, targets)
 
-        return est_preview
-
-    # --- 3食 + 間食（カードUI）---
-    b = render_meal_card("b", "朝食", expanded=True)
-    l = render_meal_card("l", "昼食", expanded=False)
-    d = render_meal_card("d", "夕食", expanded=False)
-    s = render_meal_card("s", "間食", expanded=False)
     tot_p = b["p"] + l["p"] + d["p"]
     tot_c = b["c"] + l["c"] + d["c"]
     tot_f = b["f"] + l["f"] + d["f"]
@@ -2534,6 +2344,144 @@ def soccer_video_page(code_hash: str):
                     url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
                     st.markdown(f"- [{q}]({url})")
     jams_logo_footer()
+
+
+# =========================
+# Mobile navigation (Profile -> Menu -> Pages)
+# =========================
+
+APP_PAGES = [
+    ("exercise", "🏋️ 運動処方"),
+    ("meal", "🍽 食事管理"),
+    ("height", "📏 身長予測"),
+    ("anemia", "🩸 スポーツ貧血"),
+    ("injury", "🩹 怪我の相談"),
+    ("sleep", "😴 睡眠の質"),
+    ("soccer", "🎥 サッカー動画検索"),
+]
+
+LINE_OFFICIAL_URL = os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip()  # 例: https://lin.ee/XXXX
+LINE_PREFILL_TEXT = os.getenv("KIWI_LINE_PREFILL_TEXT", "怪我の相談（アプリ）: ").strip()
+
+def _route_get():
+    return st.session_state.get("route", "")
+
+def _route_set(r: str):
+    st.session_state["route"] = r
+
+def _nav_to_menu():
+    _route_set("menu")
+    st.rerun()
+
+def _nav_button_to_menu(position: str = "top"):
+    # position is only for key uniqueness
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if st.button("⬅️ 機能選択へ戻る", key=f"to_menu_{position}", use_container_width=True):
+            _nav_to_menu()
+
+def _load_profile(code_hash: str) -> dict:
+    d = load_snapshot(code_hash, "profile") or {}
+    if isinstance(d, dict):
+        return d
+    return {}
+
+def _save_profile(code_hash: str, payload: dict):
+    save_snapshot(code_hash, "profile", payload)
+
+def profile_top_page(code_hash: str):
+    st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
+    st.markdown("## 基礎情報（最初に1回）")
+    prof = _load_profile(code_hash)
+
+    with st.container():
+        st.markdown('<div class="km-card">', unsafe_allow_html=True)
+        # 最小限：スマホで入力しやすい項目だけ
+        name = st.text_input("名前（ニックネーム可）", value=prof.get("name",""), key="pf_name")
+        sex = st.selectbox("性別", ["未選択","男","女"], index=["未選択","男","女"].index(prof.get("sex","未選択") if prof.get("sex","未選択") in ["未選択","男","女"] else "未選択"), key="pf_sex")
+        import datetime as _dt
+        _b = (prof.get("birth","") or "").strip()
+        try:
+            _b_date = _dt.date.fromisoformat(_b) if _b else _dt.date(2010,1,1)
+        except Exception:
+            _b_date = _dt.date(2010,1,1)
+        birth = st.date_input("生年月日", value=_b_date, key="pf_birth")
+        height_cm = st.number_input("身長（cm）", min_value=50.0, max_value=230.0, value=float(prof.get("height_cm") or 0.0), step=0.1, key="pf_height")
+        weight_kg = st.number_input("体重（kg）", min_value=10.0, max_value=200.0, value=float(prof.get("weight_kg") or 0.0), step=0.1, key="pf_weight")
+
+        st.markdown('<div class="km-muted">※入力後は自動保存され、リセットしない限りこの情報で進みます。</div>', unsafe_allow_html=True)
+
+        # 自動保存（毎回）
+        payload = {
+            "name": (name or "").strip(),
+            "sex": sex,
+            "birth": str(birth) if birth else "",
+            "height_cm": float(height_cm or 0.0),
+            "weight_kg": float(weight_kg or 0.0),
+        }
+        _save_profile(code_hash, payload)
+
+        colA, colB = st.columns([1,1])
+        with colA:
+            if st.button("次へ（機能を選ぶ）", type="primary", use_container_width=True, key="pf_next"):
+                _route_set("menu")
+                st.rerun()
+        with colB:
+            if st.button("基礎情報をリセット", use_container_width=True, key="pf_reset"):
+                delete_snapshot(code_hash, "profile")
+                for k in list(st.session_state.keys()):
+                    if k.startswith("pf_"):
+                        del st.session_state[k]
+                st.success("基礎情報をリセットしました。")
+                st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def menu_select_page():
+    st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
+    st.markdown("## 機能を選択")
+    st.markdown('<div class="km-muted">タップして開始します</div>', unsafe_allow_html=True)
+    st.write("")
+
+    # 2列グリッド、最後だけ1列
+    pairs = APP_PAGES[:-1]
+    last = APP_PAGES[-1]
+
+    st.markdown('<div class="km-grid">', unsafe_allow_html=True)
+    for i in range(0, len(pairs), 2):
+        left = pairs[i]
+        right = pairs[i+1] if i+1 < len(pairs) else None
+        c1, c2 = st.columns(2, gap="small")
+        with c1:
+            if st.button(left[1], key=f"menu_{left[0]}", use_container_width=True):
+                _route_set(left[0]); st.rerun()
+        with c2:
+            if right:
+                if st.button(right[1], key=f"menu_{right[0]}", use_container_width=True):
+                    _route_set(right[0]); st.rerun()
+            else:
+                st.write("")
+    st.write("")
+    # last full width
+    st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
+    if st.button(last[1], key=f"menu_{last[0]}", use_container_width=True):
+        _route_set(last[0]); st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # km-grid
+    st.markdown('</div>', unsafe_allow_html=True)
+
+def injury_line_test_box():
+    st.markdown("### 🧪（テスト）医師へ相談を送る")
+    if not LINE_OFFICIAL_URL:
+        st.info("公式LINE送信はテスト実装です。環境変数 KIWI_LINE_OFFICIAL_URL を設定すると有効になります。")
+        return
+    st.markdown("AIの結果を踏まえて医師に相談したい場合、公式LINEを開いて送信できます。")
+    ok = st.checkbox("公式LINEへ送信します（確認）", key="inj_line_confirm")
+    if ok:
+        # 送信はブラウザで公式LINEを開く（実際の送信はユーザー操作）
+        st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
+
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     premium_css()
@@ -2549,42 +2497,52 @@ def main():
 
     code_hash = sha256_hex(user)
 
-    # AIコメント（メニュー/睡眠/怪我/食事など）を前回分から復元
-    restore_ai_cache_to_session(code_hash)
-
-    # per-user saved data
+    # 最新データの自動復元（入力補助）
     try:
-        load_basic_info_snapshot(code_hash)
-    except Exception:
-        pass
-    try:
-        load_training_latest(code_hash)
+        auto_fill_from_latest_records(code_hash)
     except Exception:
         pass
 
-    shared_demographics()
-    auto_fill_latest_all_tabs(code_hash)
-    auto_fill_from_latest_records(code_hash)
+    # ルーティング初期化：基礎情報が未登録ならトップへ
+    if "route" not in st.session_state or not st.session_state.get("route"):
+        prof = load_snapshot(code_hash, "profile")
+        st.session_state["route"] = "menu" if prof else "profile"
 
-    st.markdown("### 画面選択")
-    with st.container():
-        nav = st.radio("", ["🏋️ 運動処方","🍽 食事管理","📏 身長予測","🩸 スポーツ貧血","🩹 怪我","😴 睡眠","🎥 サッカー動画"], horizontal=True, key="nav_main")
-    if nav == "🏋️ 運動処方":
+    r = _route_get()
+
+    if r == "profile":
+        profile_top_page(code_hash)
+        return
+
+    if r == "menu":
+        menu_select_page()
+        return
+
+    # 3ページ目以降：必ずトップ/ボトムに「機能選択へ戻る」
+    _nav_button_to_menu("top")
+
+    if r == "exercise":
         exercise_prescription_page(code_hash)
-    elif nav == "🍽 食事管理":
+    elif r == "meal":
         meal_page(code_hash)
-    elif nav == "📏 身長予測":
+    elif r == "height":
         height_page(code_hash)
-    elif nav == "🩸 スポーツ貧血":
+    elif r == "anemia":
         anemia_page(code_hash)
-    elif nav == "🩹 怪我":
+    elif r == "injury":
         injury_page(code_hash)
-    elif nav == "😴 睡眠":
+        injury_line_test_box()
+    elif r == "sleep":
         sleep_page(code_hash)
-    elif nav == "🎥 サッカー動画":
+    elif r == "soccer":
         soccer_video_page(code_hash)
     else:
-        exercise_prescription_page(code_hash)
+        menu_select_page()
+        return
+
+    st.markdown('<div class="km-bottom">', unsafe_allow_html=True)
+    _nav_button_to_menu("bottom")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # AIコメントをDBに保存（翌日・別端末でも復元できる）
     try:
