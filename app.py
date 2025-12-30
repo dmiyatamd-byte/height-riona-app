@@ -295,10 +295,12 @@ MEDALS = [
 ]
 
 
+
 def calc_daily_targets(weight_kg: float, goal: str) -> dict:
-    """ざっくりの1日目標（kcal/PFC）を算出。
+    """ざっくりの1日目標（kcal/P/C/F）を算出。
     goal: 'maintain'/'bulk'/'diet' など（UI表示名でもOK）
     - diet: -2kg/月 ≒ -500kcal/日を目安（成長期は下げすぎ防止の下限あり）
+    戻り値は 'kcal','p','c','f' を必ず含み、互換のため 'p_g','c_g','f_g' も同梱。
     """
     try:
         w = float(weight_kg)
@@ -309,38 +311,46 @@ def calc_daily_targets(weight_kg: float, goal: str) -> dict:
 
     # プロフィールから年齢/性別/身長を推定
     sex = str(st.session_state.get("pf_sex") or st.session_state.get("sex") or "M")
-    h = float(st.session_state.get("pf_height") or st.session_state.get("height_cm") or 165.0)
+    try:
+        h = float(st.session_state.get("pf_height") or st.session_state.get("height_cm") or 165.0)
+    except Exception:
+        h = 165.0
     dob = st.session_state.get("pf_dob") or st.session_state.get("dob")
 
-    age = 16.0
+    # 年齢推定（失敗してもOK）
     try:
+        age = 16.0
         if dob:
+            from datetime import datetime, date
             if isinstance(dob, str):
-                from datetime import datetime
-                # 'YYYY-MM-DD' or similar
                 d = datetime.fromisoformat(dob).date()
-            else:
+            elif hasattr(dob, "year"):
                 d = dob
-            today = now_jst().date()
-            age = (today - d).days / 365.25
+            else:
+                d = None
+            if d:
+                today = now_jst().date()
+                age = (today - d).days / 365.25
     except Exception:
         age = 16.0
 
     # BMR (Mifflin-St Jeor)
-    # 男性: 10w + 6.25h - 5a + 5 / 女性: ... -161
     s_const = 5 if sex.upper().startswith("M") else -161
-    bmr = 10*w + 6.25*h - 5*age + s_const
+    bmr = 10.0*w + 6.25*h - 5.0*age + s_const
 
     # 活動係数（アスリート寄りのざっくり）
-    activity = float(st.session_state.get("activity_factor") or 1.6)
+    try:
+        activity = float(st.session_state.get("activity_factor") or 1.6)
+    except Exception:
+        activity = 1.6
     tdee = bmr * activity
 
     g = str(goal or "").lower()
-    if "diet" in g or "減量" in g:
+    if ("diet" in g) or ("ダイエット" in g) or ("減量" in g):
         kcal = tdee - 500.0
         p_g = 1.8 * w
         f_g = 0.8 * w
-    elif "bulk" in g or "増量" in g:
+    elif ("bulk" in g) or ("増量" in g):
         kcal = tdee + 300.0
         p_g = 1.8 * w
         f_g = 1.0 * w
@@ -357,15 +367,24 @@ def calc_daily_targets(weight_kg: float, goal: str) -> dict:
     kcal = max(kcal, kcal_floor)
 
     # carbs remainder
-    kcal_p = p_g * 4
-    kcal_f = f_g * 9
-    c_g = max(0.0, (kcal - kcal_p - kcal_f) / 4)
+    kcal_p = p_g * 4.0
+    kcal_f = f_g * 9.0
+    c_g = max(0.0, (kcal - kcal_p - kcal_f) / 4.0)
+
+    kcal_r = float(round(kcal))
+    p_r = float(round(p_g))
+    f_r = float(round(f_g))
+    c_r = float(round(c_g))
 
     return {
-        "kcal": float(round(kcal)),
-        "p_g": float(round(p_g)),
-        "f_g": float(round(f_g)),
-        "c_g": float(round(c_g)),
+        "kcal": kcal_r,
+        "p": p_r,
+        "c": c_r,
+        "f": f_r,
+        # backward compatible keys
+        "p_g": p_r,
+        "c_g": c_r,
+        "f_g": f_r,
         "age": float(round(age, 1)),
         "activity_factor": float(activity),
     }
@@ -1907,7 +1926,7 @@ def meal_page(code_hash: str):
     # 目的（ダイエットあり）
     goal = st.selectbox("目的", ["増量", "維持", "回復", "ダイエット"], key="meal_goal", index=1)
     targets = calc_daily_targets(w, goal)  # 既存関数（-2kg/月は内部で反映）
-    st.caption(f"目標（1日）: kcal {targets['kcal']:.0f} / P {targets['p']:.0f}g / C {targets['c']:.0f}g / F {targets['f']:.0f}g")
+    st.caption(f"目標（1日）: kcal {targets.get('kcal',0):.0f} / P {targets.get('p', targets.get('p_g',0)):.0f}g / C {targets.get('c', targets.get('c_g',0)):.0f}g / F {targets.get('f', targets.get('f_g',0)):.0f}g")
 
     tabs = st.tabs(["朝食", "昼食", "夕食"])
 
