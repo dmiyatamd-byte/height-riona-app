@@ -1998,64 +1998,76 @@ def exercise_prescription_page(code_hash: str):
             st.session_state["tr_goal_text"] = goal_sel
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
 
-        # --- 内容メモの写真（練習メニューのボード等） ---
+                # --- 内容メモの写真（練習メニューのボード等） ---
         st.markdown("##### 📸 内容メモの写真（練習メニューのボードなど）")
-        st.session_state.setdefault("tr_photos", [])
+        photos_key = "tr_photos"
+        st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
         st.session_state.setdefault("tr_thumb_w", 88)
 
-        # 入力（camera_input）は場所を取るので折りたたみ
-        with st.expander("写真を追加", expanded=False):
-            thumb_w = st.slider("サムネイルサイズ", min_value=70, max_value=160, value=int(st.session_state.get("tr_thumb_w", 88)), step=5, key="tr_thumb_w")
-            cam = st.file_uploader("写真を追加（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=False, key="tr_memo_uploader")
-
-            cP1, cP2 = st.columns([1,1])
-            with cP1:
-                if st.button("写真を追加", key="tr_add_photo"):
-                    if cam is None:
-                        st.warning("写真がありません。撮影してから追加してください。")
+        # 入力UIは場所を取るので折りたたみ（食事管理と同じ方式）
+        with st.expander("📸 写真を追加（カメラ/アルバム）", expanded=False):
+            thumb_w = st.slider(
+                "サムネイルサイズ",
+                min_value=70,
+                max_value=180,
+                value=int(st.session_state.get("tr_thumb_w", 88)),
+                step=5,
+                key="tr_thumb_w",
+            )
+            up = st.file_uploader(
+                "写真を追加（カメラ/アルバム）",
+                type=["jpg", "jpeg", "png", "heic", "heif"],
+                accept_multiple_files=False,
+                key="tr_memo_uploader",
+            )
+            if st.button("写真を追加", key="tr_add_photo"):
+                if up is None:
+                    st.warning("写真がありません。")
+                else:
+                    img_bytes, err = _uploaded_image_to_jpeg_bytes(up)
+                    if err:
+                        st.error(err)
                     else:
-                        img_bytes, err = _uploaded_image_to_jpeg_bytes(cam)
-                        if err:
-                            st.warning(f"画像の読み込みに失敗しました: {err}")
-                        else:
-                            try:
-                                import base64
-                                store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=82)
-                                b64s = base64.b64encode(store_bytes).decode("ascii")
-                                lst = st.session_state.get("tr_photos", [])
-                                lst.append({"ts": iso(now_jst()), "b64": b64s})
-                                # 最新6枚まで保持（必要ならここを増やせます）
-                                st.session_state["tr_photos"] = lst[-6:]
-                                st.success("追加しました。")
-                                st.rerun()
-                            except Exception:
-                                st.warning("保存処理でエラーが発生しました。")
-            with cP2:
-                if st.button("最後の写真を削除", key="tr_del_last_photo"):
-                    lst = st.session_state.get("tr_photos", [])
-                    if lst:
-                        st.session_state["tr_photos"] = lst[:-1]
+                        import base64
+                        from datetime import datetime
+
+                        store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=80)
+                        b64s = base64.b64encode(store_bytes).decode("ascii")
+                        photos = st.session_state.get(photos_key, [])
+                        photos = (photos + [{"ts": datetime.now().isoformat(), "b64": b64s}])[-6:]  # 最新6枚
+                        st.session_state[photos_key] = photos
+                        st.success("写真を追加しました。")
                         st.rerun()
 
-        photos = st.session_state.get("tr_photos", [])
+        # サムネイル表示（小さく）＋「拡大」＋「画像を開く（別タブ）」
+        photos = st.session_state.get(photos_key, [])
         if photos:
-            st.caption("保存済み写真（最新6枚） ※「画像を開く」または「拡大」で表示")
+            st.caption("追加済み写真（最新6枚）")
             show = photos[-6:]
-            for row_start in range(0, len(show), 3):
-                row = show[row_start:row_start+3]
+            # 3列グリッド
+            ncols = 3
+            import base64 as _b64
+            for row_start in range(0, len(show), ncols):
+                row = show[row_start:row_start + ncols]
                 cols = st.columns(len(row))
                 for i, p in enumerate(row):
+                    b64s = p.get("b64", "")
                     try:
-                        import base64
-                        b64s = p.get("b64", "")
-                        b = base64.b64decode(b64s)
+                        b = _b64.b64decode(b64s)
                         cols[i].image(b, width=int(st.session_state.get("tr_thumb_w", 88)))
-                        # クリックで開けるリンク（新しいタブ）
-                        cols[i].markdown(f'<div style="text-align:center;margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" style="font-size:12px;">画像を開く</a></div>', unsafe_allow_html=True)
-                        if cols[i].button("拡大", key=f"tr_zoom_{row_start+i}"):
-                            open_image_viewer(b64s, title="運動処方：内容メモの写真")
                     except Exception:
                         cols[i].write("（画像）")
+                    # 別タブで直接開く
+                    cols[i].markdown(
+                        f'<a href="data:image/jpeg;base64,{b64s}" target="_blank" rel="noopener noreferrer">画像を開く</a>',
+                        unsafe_allow_html=True,
+                    )
+                    if cols[i].button("拡大", key=f"tr_zoom_{row_start+i}"):
+                        open_image_viewer(b64s, title="運動処方：内容メモの写真")
+
+            if st.button("最後の写真を削除", key="tr_del_last_photo"):
+                st.session_state[photos_key] = photos[:-1]
+                st.rerun()
 
         cA, cB, cD, cC = st.columns([1,1,1,2])
         with cA:
