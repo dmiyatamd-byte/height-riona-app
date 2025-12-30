@@ -814,7 +814,7 @@ def load_basic_info_snapshot(code_hash: str) -> bool:
         st.session_state["age_years"] = float(years_between(st.session_state["dob"], today))
     return True
 
-TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes"]
+TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes","tr_photos","tr_thumb_w"]
 
 def save_training_latest(code_hash: str):
     payload = {k: st.session_state.get(k) for k in TRAINING_KEYS}
@@ -1509,11 +1509,16 @@ def compute_targets_pfc(weight_kg: float, age_years: float, sport: str, intensit
     base = 45.0 if age_years < 12 else (50.0 if age_years < 15 else 48.0)
     sport_factor = {"サッカー":1.05,"ラグビー":1.10,"野球":1.00,"テニス":1.00,"水泳":1.08}.get(sport,1.0)
     intensity_factor = {"低":0.95,"中":1.00,"高":1.10}.get(intensity,1.0)
-    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03}.get(goal,1.0)
+    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03,"ダイエット":1.00}.get(goal,1.0)
     kcal = weight_kg * base * sport_factor * intensity_factor * goal_factor
-    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0}.get(goal,1.6)
+    # ダイエット：-2kg/月 ≒ -15,400 kcal/月 → -約500 kcal/日を目安（成長期は下げすぎない）
+    if goal == "ダイエット":
+        kcal = kcal - 520.0
+        floor = weight_kg * (30.0 if age_years < 18 else 25.0)
+        kcal = max(kcal, floor)
+    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0,"ダイエット":1.8}.get(goal,1.6)
     p_g = p_perkg * weight_kg
-    f_pct = 0.25 if goal in ["増量","維持"] else 0.28
+    f_pct = 0.25 if goal in ["増量","維持","ダイエット"] else 0.28
     f_g = (kcal * f_pct) / 9.0
     c_g = max(0.0, kcal - p_g*4.0 - f_g*9.0) / 4.0
     return {"kcal":kcal, "p_g":p_g, "c_g":c_g, "f_g":f_g}
@@ -1590,6 +1595,25 @@ def _uploaded_image_to_jpeg_bytes(up) -> tuple:
         return None, f"画像の読み込みに失敗しました（{e}）"
 
 
+def _resize_jpeg_bytes(jpeg_bytes: bytes, max_w: int = 1024, quality: int = 80) -> bytes:
+    """Resize JPEG bytes to max width to keep storage small (returns JPEG bytes)."""
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(jpeg_bytes))
+        img = img.convert("RGB")
+        w, h = img.size
+        if w > max_w:
+            new_h = int(h * (max_w / float(w)))
+            img = img.resize((max_w, max(1, new_h)))
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=quality)
+        return out.getvalue()
+    except Exception:
+        return jpeg_bytes
+
+
+
 def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True, default_manual: bool = False):
     """
     1食分の入力（スマホ優先）
@@ -1603,6 +1627,9 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
 
     ai = st.session_state.get(f"{prefix}_ai")
 
+    photos_key = f"{prefix}_photos"
+    st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
+
     if allow_photo:
         st.caption("基本：写真 → AI解析")
         cap = st.camera_input("写真を撮る", key=f"{prefix}_camera")
@@ -1614,7 +1641,7 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
             if err:
                 st.error(err)
             else:
-                st.image(chosen, caption="取り込み画像", width=200)
+                st.image(chosen, caption="取り込み画像", width=140)
                 if st.button("AIで食事を解析する（主食/主菜/野菜）", type="primary", key=f"{prefix}_ai_btn"):
                     out, err2 = analyze_meal_photo(img_bytes, title)
                     if err2:
@@ -1627,6 +1654,17 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
                     else:
                         ai = out
                         st.session_state[f"{prefix}_ai"] = ai
+
+                        # 写真は上書きせず追加（最新3枚まで保持）
+                        try:
+                            import base64
+                            store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1024, quality=80)
+                            b64s = base64.b64encode(store_bytes).decode("ascii")
+                            lst = st.session_state.get(photos_key, [])
+                            lst.append({"ts": iso(now_jst()), "b64": b64s})
+                            st.session_state[photos_key] = lst[-3:]
+                        except Exception:
+                            pass
 
                         est = meal_estimate(
                             ai.get("carb", "普"),
@@ -1655,6 +1693,23 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
 
         if ai:
             st.info(f"AI推定：主食={ai.get('carb','?')} / 主菜={ai.get('protein','?')} / 野菜={ai.get('veg','?')} / 脂質={ai.get('fat','?')}（信頼度 {ai.get('confidence',0):.2f}）")
+
+        # 追加済み写真（上書きせず、最新3枚まで保持）
+        photos = st.session_state.get(photos_key, [])
+        if photos:
+            st.caption("追加済み写真（最新3枚）")
+            show = photos[-3:]
+            cols = st.columns(len(show))
+            for i, p in enumerate(show):
+                try:
+                    import base64
+                    b = base64.b64decode(p.get("b64", ""))
+                    cols[i].image(b, width=120)
+                except Exception:
+                    cols[i].write("（画像）")
+            if st.button("最後の写真を削除", key=f"{prefix}_del_last_photo"):
+                st.session_state[photos_key] = photos[:-1]
+                st.rerun()
 
         if st.button("写真がとれないとき（手入力）", key=f"{prefix}_open_manual"):
             st.session_state[manual_key] = True
@@ -1733,6 +1788,7 @@ def meal_page(code_hash: str):
         keys = [
             "meal_goal", "meal_intensity", "meal_weight",
             "b_ai", "l_ai", "d_ai",
+            "b_photos", "l_photos", "d_photos",
             "b_manual_open", "l_manual_open", "d_manual_open",
             "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
             "b_c","b_p","b_v","b_dairy","b_fruit","b_fried",
@@ -1754,7 +1810,9 @@ def meal_page(code_hash: str):
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
     top = st.columns(4)
-    goal = top[0].selectbox("目的", ["増量","維持","回復"], index=1, key="meal_goal")
+    goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
+    if goal == "ダイエット":
+        st.info("ダイエットは『-2kg/月』を目標（目安：-約500kcal/日）。筋量を落とさないため、たんぱく質は高め（約1.8g/kg/日）、主食は運動量に合わせて調整します。毎週の体重・コンディションで微調整してください。成長期は無理な制限は避け、月-2kgでもきつい場合はペースを落とします。")
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
     weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
@@ -1870,11 +1928,13 @@ def exercise_prescription_page(code_hash: str):
         st.session_state.setdefault("tr_rpe", 5)
         st.session_state.setdefault("tr_focus", "")
         st.session_state.setdefault("tr_notes", "")
+        st.session_state.setdefault("tr_photos", [])
+        st.session_state.setdefault("tr_thumb_w", 140)
 
         st.date_input("日付", value=st.session_state.get("tr_date"), key="tr_date")
         st.selectbox(
             "種類",
-            ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","リカバリー","その他"],
+            ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","低酸素トレーニング","リカバリー","その他"],
             index=0,
             key="tr_type"
         )
@@ -1886,7 +1946,7 @@ def exercise_prescription_page(code_hash: str):
         )
         st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
                 # 主目的（プリセット＋自由入力）
-        goal_opts = ["スプリント", "当たり負け改善", "持久力", "低酸素トレーニング", "リカバリー", "技術練習", "その他（自由入力）"]
+        goal_opts = ["スプリント", "当たり負け改善", "持久力", "リカバリー", "技術練習", "その他（自由入力）"]
         cur_goal = (st.session_state.get("tr_goal_text") or "").strip()
         default_idx = 0
         if cur_goal in goal_opts:
@@ -1899,6 +1959,59 @@ def exercise_prescription_page(code_hash: str):
         else:
             st.session_state["tr_goal_text"] = goal_sel
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
+
+        # --- 内容メモの写真（練習メニューのボード等） ---
+        st.markdown("##### 📸 内容メモの写真（練習メニューのボードなど）")
+        st.session_state.setdefault("tr_photos", [])
+        st.session_state.setdefault("tr_thumb_w", 140)
+
+        thumb_w = st.slider("サムネイルサイズ", min_value=80, max_value=240, value=int(st.session_state.get("tr_thumb_w", 140)), step=10, key="tr_thumb_w")
+        cam = st.camera_input("写真を撮る（そのまま保存できます）", key="tr_memo_cam")
+
+        cP1, cP2 = st.columns([1,1])
+        with cP1:
+            if st.button("写真を追加", key="tr_add_photo"):
+                if cam is None:
+                    st.warning("写真がありません。撮影してから追加してください。")
+                else:
+                    img_bytes, err = _uploaded_image_to_jpeg_bytes(cam)
+                    if err:
+                        st.warning(f"画像の読み込みに失敗しました: {err}")
+                    else:
+                        try:
+                            import base64
+                            store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=82)
+                            b64s = base64.b64encode(store_bytes).decode("ascii")
+                            lst = st.session_state.get("tr_photos", [])
+                            lst.append({"ts": iso(now_jst()), "b64": b64s})
+                            # 最新6枚まで保持（必要ならここを増やせます）
+                            st.session_state["tr_photos"] = lst[-6:]
+                            st.success("追加しました。")
+                            st.rerun()
+                        except Exception:
+                            st.warning("保存処理でエラーが発生しました。")
+        with cP2:
+            if st.button("最後の写真を削除", key="tr_del_last_photo"):
+                lst = st.session_state.get("tr_photos", [])
+                if lst:
+                    st.session_state["tr_photos"] = lst[:-1]
+                    st.rerun()
+
+        photos = st.session_state.get("tr_photos", [])
+        if photos:
+            st.caption("保存済み写真（最新6枚）")
+            show = photos[-6:]
+            # 3枚/行で表示
+            for row_start in range(0, len(show), 3):
+                row = show[row_start:row_start+3]
+                cols = st.columns(len(row))
+                for i, p in enumerate(row):
+                    try:
+                        import base64
+                        b = base64.b64decode(p.get("b64",""))
+                        cols[i].image(b, width=int(thumb_w))
+                    except Exception:
+                        cols[i].write("（画像）")
 
         cA, cB, cD, cC = st.columns([1,1,1,2])
         with cA:
