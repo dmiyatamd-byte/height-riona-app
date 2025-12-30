@@ -260,10 +260,9 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(3):has(input:ch
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:checked){ background: rgba(245,158,11,0.12) !important; outline-color: rgba(245,158,11,0.40) !important; }
 
 
-/* ===== Global button tap targets (mobile) ===== */
+/* ===== Mobile: keep buttons readable, but don't force huge height (thumbnails need compact UI) ===== */
 @media (max-width: 640px){
   div.stButton > button{
-    min-height: 64px !important;
     font-size: 16px !important;
     font-weight: 800 !important;
     border-radius: 16px !important;
@@ -271,6 +270,39 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 }
 </style>
     """, unsafe_allow_html=True)
+
+
+# =========================
+# Image viewer (thumbnails -> full view)
+# =========================
+
+def open_image_viewer(b64: str, title: str = ""):
+    """Open an in-app image viewer (separate stage) for a stored base64 JPEG."""
+    if not b64:
+        return
+    st.session_state["img_view_b64"] = b64
+    st.session_state["img_view_title"] = title or "写真"
+    st.session_state["img_view_prev_stage"] = st.session_state.get("app_stage", "menu")
+    st.session_state["img_view_prev_page"] = st.session_state.get("current_page", "exercise")
+    st.session_state["app_stage"] = "image_view"
+    st.rerun()
+
+
+def image_viewer_page():
+    """Fullscreen-ish viewer with back button."""
+    title = st.session_state.get("img_view_title", "写真")
+    b64 = st.session_state.get("img_view_b64", "")
+    if st.button("← 戻る", use_container_width=True, key="img_view_back"):
+        st.session_state["app_stage"] = st.session_state.get("img_view_prev_stage", "menu")
+        st.session_state["current_page"] = st.session_state.get("img_view_prev_page", "exercise")
+        st.rerun()
+    st.subheader(title)
+    try:
+        import base64
+        img = base64.b64decode(b64)
+        st.image(img, use_container_width=True)
+    except Exception:
+        st.error("画像を表示できませんでした。")
 
 # =========================
 # Utils
@@ -1631,65 +1663,66 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
     st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
 
     if allow_photo:
-        st.caption("基本：写真 → AI解析")
-        cap = st.camera_input("写真を撮る", key=f"{prefix}_camera")
-        up = st.file_uploader("写真を選ぶ（アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_file")
+        st.caption("基本：写真 → AI解析（必要な時だけ開いてください）")
+        with st.expander("📸 写真を追加／解析", expanded=False):
+            cap = st.camera_input("写真を撮る", key=f"{prefix}_camera")
+            up = st.file_uploader("写真を選ぶ（アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_file")
 
-        chosen = cap if cap is not None else up
-        if chosen is not None:
-            img_bytes, err = _uploaded_image_to_jpeg_bytes(chosen)
-            if err:
-                st.error(err)
-            else:
-                st.image(chosen, caption="取り込み画像", width=140)
-                if st.button("AIで食事を解析する（主食/主菜/野菜）", type="primary", key=f"{prefix}_ai_btn"):
-                    out, err2 = analyze_meal_photo(img_bytes, title)
-                    if err2:
-                        st.error("写真解析に失敗: " + err2)
-                        ai = None
-                        st.session_state.pop(f"{prefix}_comment", None)
-                        st.session_state.pop(f"{prefix}_score", None)
-                        st.session_state.pop(f"{prefix}_status", None)
-                        st.session_state.pop(f"{prefix}_bullets", None)
-                    else:
-                        ai = out
-                        st.session_state[f"{prefix}_ai"] = ai
+            chosen = cap if cap is not None else up
+            if chosen is not None:
+                img_bytes, err = _uploaded_image_to_jpeg_bytes(chosen)
+                if err:
+                    st.error(err)
+                else:
+                    st.image(chosen, caption="取り込み画像（プレビュー）", width=110)
+                    if st.button("AIで食事を解析する（主食/主菜/野菜）", type="primary", key=f"{prefix}_ai_btn"):
+                        out, err2 = analyze_meal_photo(img_bytes, title)
+                        if err2:
+                            st.error("写真解析に失敗: " + err2)
+                            ai = None
+                            st.session_state.pop(f"{prefix}_comment", None)
+                            st.session_state.pop(f"{prefix}_score", None)
+                            st.session_state.pop(f"{prefix}_status", None)
+                            st.session_state.pop(f"{prefix}_bullets", None)
+                        else:
+                            ai = out
+                            st.session_state[f"{prefix}_ai"] = ai
 
-                        # 写真は上書きせず追加（最新3枚まで保持）
-                        try:
-                            import base64
-                            store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1024, quality=80)
-                            b64s = base64.b64encode(store_bytes).decode("ascii")
-                            lst = st.session_state.get(photos_key, [])
-                            lst.append({"ts": iso(now_jst()), "b64": b64s})
-                            st.session_state[photos_key] = lst[-3:]
-                        except Exception:
-                            pass
+                            # 写真は上書きせず追加（最新3枚まで保持）
+                            try:
+                                import base64
+                                store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1024, quality=80)
+                                b64s = base64.b64encode(store_bytes).decode("ascii")
+                                lst = st.session_state.get(photos_key, [])
+                                lst.append({"ts": iso(now_jst()), "b64": b64s})
+                                st.session_state[photos_key] = lst[-3:]
+                            except Exception:
+                                pass
 
-                        est = meal_estimate(
-                            ai.get("carb", "普"),
-                            ai.get("protein", "普"),
-                            ai.get("veg", "普"),
-                            bool(ai.get("fried_or_oily", False)),
-                            bool(ai.get("dairy", False)),
-                            bool(ai.get("fruit", False)),
-                        )
-                        score, status, bullets = rate_meal(prefix, est, targets)
-                        st.session_state[f"{prefix}_score"] = score
-                        st.session_state[f"{prefix}_status"] = status
-                        st.session_state[f"{prefix}_bullets"] = bullets
+                            est = meal_estimate(
+                                ai.get("carb", "普"),
+                                ai.get("protein", "普"),
+                                ai.get("veg", "普"),
+                                bool(ai.get("fried_or_oily", False)),
+                                bool(ai.get("dairy", False)),
+                                bool(ai.get("fruit", False)),
+                            )
+                            score, status, bullets = rate_meal(prefix, est, targets)
+                            st.session_state[f"{prefix}_score"] = score
+                            st.session_state[f"{prefix}_status"] = status
+                            st.session_state[f"{prefix}_bullets"] = bullets
 
-                        system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
-                        user = f"""{title}の写真推論からPFCとkcalを推定しました。
+                            system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
+                            user = f"""{title}の写真推論からPFCとkcalを推定しました。
 推定: kcal={est['kcal']:.0f}, P={est['p']:.0f}g, C={est['c']:.0f}g, F={est['f']:.0f}g
 1日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
 この{title}は朝昼夕の配分を考えると、今の量が適切か、改善点を短い寸評（100〜140字）で書いてください。
 出力は寸評のみ。"""
-                        comment, e3 = ai_text(system, user)
-                        if e3 or not comment:
-                            comment = " / ".join(bullets)
-                        st.session_state[f"{prefix}_comment"] = (comment or "").strip()
-                        st.success("解析しました。")
+                            comment, e3 = ai_text(system, user)
+                            if e3 or not comment:
+                                comment = " / ".join(bullets)
+                            st.session_state[f"{prefix}_comment"] = (comment or "").strip()
+                            st.success("解析しました。")
 
         if ai:
             st.info(f"AI推定：主食={ai.get('carb','?')} / 主菜={ai.get('protein','?')} / 野菜={ai.get('veg','?')} / 脂質={ai.get('fat','?')}（信頼度 {ai.get('confidence',0):.2f}）")
@@ -1697,14 +1730,17 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
         # 追加済み写真（上書きせず、最新3枚まで保持）
         photos = st.session_state.get(photos_key, [])
         if photos:
-            st.caption("追加済み写真（最新3枚）")
+            st.caption("追加済み写真（最新3枚） ※サムネをタップすると拡大表示")
             show = photos[-3:]
             cols = st.columns(len(show))
             for i, p in enumerate(show):
                 try:
                     import base64
-                    b = base64.b64decode(p.get("b64", ""))
-                    cols[i].image(b, width=120)
+                    b64s = p.get("b64", "")
+                    b = base64.b64decode(b64s)
+                    cols[i].image(b, width=88)
+                    if cols[i].button("拡大", key=f"{prefix}_zoom_{i}"):
+                        open_image_viewer(b64s, title=f"{title}（写真）")
                 except Exception:
                     cols[i].write("（画像）")
             if st.button("最後の写真を削除", key=f"{prefix}_del_last_photo"):
@@ -1963,53 +1999,57 @@ def exercise_prescription_page(code_hash: str):
         # --- 内容メモの写真（練習メニューのボード等） ---
         st.markdown("##### 📸 内容メモの写真（練習メニューのボードなど）")
         st.session_state.setdefault("tr_photos", [])
-        st.session_state.setdefault("tr_thumb_w", 140)
+        st.session_state.setdefault("tr_thumb_w", 88)
 
-        thumb_w = st.slider("サムネイルサイズ", min_value=80, max_value=240, value=int(st.session_state.get("tr_thumb_w", 140)), step=10, key="tr_thumb_w")
-        cam = st.camera_input("写真を撮る（そのまま保存できます）", key="tr_memo_cam")
+        # 入力（camera_input）は場所を取るので折りたたみ
+        with st.expander("写真を追加", expanded=False):
+            thumb_w = st.slider("サムネイルサイズ", min_value=70, max_value=160, value=int(st.session_state.get("tr_thumb_w", 88)), step=5, key="tr_thumb_w")
+            cam = st.camera_input("撮影（保存用）", key="tr_memo_cam")
 
-        cP1, cP2 = st.columns([1,1])
-        with cP1:
-            if st.button("写真を追加", key="tr_add_photo"):
-                if cam is None:
-                    st.warning("写真がありません。撮影してから追加してください。")
-                else:
-                    img_bytes, err = _uploaded_image_to_jpeg_bytes(cam)
-                    if err:
-                        st.warning(f"画像の読み込みに失敗しました: {err}")
+            cP1, cP2 = st.columns([1,1])
+            with cP1:
+                if st.button("写真を追加", key="tr_add_photo"):
+                    if cam is None:
+                        st.warning("写真がありません。撮影してから追加してください。")
                     else:
-                        try:
-                            import base64
-                            store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=82)
-                            b64s = base64.b64encode(store_bytes).decode("ascii")
-                            lst = st.session_state.get("tr_photos", [])
-                            lst.append({"ts": iso(now_jst()), "b64": b64s})
-                            # 最新6枚まで保持（必要ならここを増やせます）
-                            st.session_state["tr_photos"] = lst[-6:]
-                            st.success("追加しました。")
-                            st.rerun()
-                        except Exception:
-                            st.warning("保存処理でエラーが発生しました。")
-        with cP2:
-            if st.button("最後の写真を削除", key="tr_del_last_photo"):
-                lst = st.session_state.get("tr_photos", [])
-                if lst:
-                    st.session_state["tr_photos"] = lst[:-1]
-                    st.rerun()
+                        img_bytes, err = _uploaded_image_to_jpeg_bytes(cam)
+                        if err:
+                            st.warning(f"画像の読み込みに失敗しました: {err}")
+                        else:
+                            try:
+                                import base64
+                                store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=82)
+                                b64s = base64.b64encode(store_bytes).decode("ascii")
+                                lst = st.session_state.get("tr_photos", [])
+                                lst.append({"ts": iso(now_jst()), "b64": b64s})
+                                # 最新6枚まで保持（必要ならここを増やせます）
+                                st.session_state["tr_photos"] = lst[-6:]
+                                st.success("追加しました。")
+                                st.rerun()
+                            except Exception:
+                                st.warning("保存処理でエラーが発生しました。")
+            with cP2:
+                if st.button("最後の写真を削除", key="tr_del_last_photo"):
+                    lst = st.session_state.get("tr_photos", [])
+                    if lst:
+                        st.session_state["tr_photos"] = lst[:-1]
+                        st.rerun()
 
         photos = st.session_state.get("tr_photos", [])
         if photos:
-            st.caption("保存済み写真（最新6枚）")
+            st.caption("保存済み写真（最新6枚） ※サムネをタップして拡大")
             show = photos[-6:]
-            # 3枚/行で表示
             for row_start in range(0, len(show), 3):
                 row = show[row_start:row_start+3]
                 cols = st.columns(len(row))
                 for i, p in enumerate(row):
                     try:
                         import base64
-                        b = base64.b64decode(p.get("b64",""))
-                        cols[i].image(b, width=int(thumb_w))
+                        b64s = p.get("b64", "")
+                        b = base64.b64decode(b64s)
+                        cols[i].image(b, width=int(st.session_state.get("tr_thumb_w", 88)))
+                        if cols[i].button("拡大", key=f"tr_zoom_{row_start+i}"):
+                            open_image_viewer(b64s, title="運動処方：内容メモの写真")
                     except Exception:
                         cols[i].write("（画像）")
 
@@ -2600,6 +2640,8 @@ def main():
     stage = st.session_state.get("app_stage", "basic")
     if stage == "basic":
         basic_info_entry_page(code_hash)
+    elif stage == "image_view":
+        image_viewer_page()
     elif stage == "menu":
         menu_page()
     else:
