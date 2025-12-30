@@ -722,7 +722,14 @@ def _mark_manual(key: str):
     st.session_state[f"{key}__manual"] = True
 
 def _set_global_weight(code_hash: str, w: float, *, write_back_profile: bool = True):
-    """Update global weight (profile_weight_kg) and propagate to non-manual tab weights."""
+    """Update global weight (profile_weight_kg) and persist to profile snapshot.
+
+    IMPORTANT:
+    Do NOT write into other widget keys here. Streamlit forbids mutating a widget's session_state
+    key after that widget has been instantiated in the current run.
+    Propagation to other tabs is handled safely at the very top of the script via
+    _sync_weight_defaults_before_render(), which runs BEFORE any widgets are created.
+    """
     try:
         w = float(w)
     except Exception:
@@ -732,14 +739,6 @@ def _set_global_weight(code_hash: str, w: float, *, write_back_profile: bool = T
 
     st.session_state["profile_weight_kg"] = w
     st.session_state["latest_weight_kg"] = w  # backward-compat
-
-    # propagate to other tab keys if they are not manual
-    for k in WEIGHT_KEYS:
-        if k == "pf_weight":
-            # pf_weight is the profile editor widget; don't force-set it here (avoid widget key conflicts)
-            continue
-        if not _is_manual(k):
-            st.session_state[k] = w
 
     if write_back_profile:
         _set_profile_weight_kg_in_snapshot(code_hash, w)
