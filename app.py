@@ -2389,6 +2389,53 @@ def _load_profile(code_hash: str) -> dict:
 def _save_profile(code_hash: str, payload: dict):
     save_snapshot(code_hash, "profile", payload)
 
+
+def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
+    """Load profile snapshot (if needed) and sync key fields into st.session_state
+    so other pages can use them as defaults (dob/age/sex/weight/height).
+    """
+    if prof is None:
+        prof = _load_profile(code_hash) or {}
+    # birth -> dob + age_years
+    b = (prof.get("birth") or "").strip()
+    dob = None
+    try:
+        if b:
+            dob = date.fromisoformat(b)
+    except Exception:
+        dob = None
+
+    if dob:
+        st.session_state["dob"] = dob
+        # age in years (JST date basis)
+        today = datetime.now(timezone(timedelta(hours=9))).date()
+        age_days = (today - dob).days
+        st.session_state["age_years"] = max(0.0, age_days / 365.25)
+    # sex -> sex_code
+    sex = (prof.get("sex") or "").strip()
+    if sex == "男":
+        st.session_state["sex_code"] = "M"
+    elif sex == "女":
+        st.session_state["sex_code"] = "F"
+
+    # defaults for weight/height used by multiple pages (do not overwrite if user already set this session)
+    try:
+        w = float(prof.get("weight_kg") or 0.0)
+    except Exception:
+        w = 0.0
+    if ("latest_weight_kg" not in st.session_state) or float(st.session_state.get("latest_weight_kg") or 0.0) <= 0.0:
+        if w > 0:
+            st.session_state["latest_weight_kg"] = w
+
+    try:
+        h = float(prof.get("height_cm") or 0.0)
+    except Exception:
+        h = 0.0
+    if ("latest_height_cm" not in st.session_state) or float(st.session_state.get("latest_height_cm") or 0.0) <= 0.0:
+        if h > 0:
+            st.session_state["latest_height_cm"] = h
+
+
 def profile_top_page(code_hash: str):
     st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
     st.markdown("## 基礎情報（最初に1回）")
@@ -2427,6 +2474,7 @@ def profile_top_page(code_hash: str):
             "weight_kg": float(weight_kg or 0.0),
         }
         _save_profile(code_hash, payload)
+        _sync_profile_to_session(code_hash, payload)
 
         colA, colB = st.columns([1,1])
         with colA:
@@ -2507,6 +2555,14 @@ def main():
     # 最新データの自動復元（入力補助）
     try:
         auto_fill_from_latest_records(code_hash)
+    except Exception:
+        pass
+
+    # 基礎情報が保存済みなら、dob/体重などをセッションへ同期（他ページの初期値に使う）
+    try:
+        prof = _load_profile(code_hash)
+        if prof:
+            _sync_profile_to_session(code_hash, prof)
     except Exception:
         pass
 
