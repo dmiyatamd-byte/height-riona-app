@@ -266,56 +266,6 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 # Utils
 # =========================
 
-def parse_menu_sections(menu_text: str):
-    """Split menu text into sections by headings like '【上半身】' etc."""
-    t = (menu_text or "").strip()
-    if not t:
-        return []
-    # Normalize newlines
-    t = t.replace('\r\n','\n').replace('\r','\n')
-    # If it already contains bracket headings, split on them
-    parts = re.split(r'(?=^【[^】]{1,20}】\s*$)', t, flags=re.M)
-    sections = []
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        m = re.match(r'^【([^】]{1,20})】\s*\n?(.*)$', p, flags=re.S)
-        if m:
-            title = m.group(1).strip()
-            body = m.group(2).strip()
-            sections.append((title, body))
-        else:
-            sections.append(("全体", p))
-    return sections
-
-def render_menu_blocks(menu_text: str):
-    """Render larger, copy-friendly menu blocks."""
-    st.markdown("""<style>
-    /* Make textareas easier to read */
-    div[data-testid="stTextArea"] textarea { font-size: 16px !important; line-height: 1.5 !important; }
-    </style>""", unsafe_allow_html=True)
-
-    st.markdown("#### 生成メニュー（見やすく／コピーしやすく）")
-    full = (menu_text or "").strip()
-    if not full:
-        st.info("メニューがまだ生成されていません。")
-        return
-
-    ai_highlight_box("🏋️ 生成メニュー（保存されます）", full)
-    st.caption("※コピーはページ最下部の『保存したAIコメント』から行えます。")
-
-    secs = parse_menu_sections(full)
-    if len(secs) <= 1:
-        return
-
-    for i, (title, body) in enumerate(secs, start=1):
-        with st.expander(f"{title}（開く）", expanded=(title in ["上半身","下半身","体幹","４週間の進め方","4週間の進め方"])): 
-            txt = f"【{title}】\n{body}".strip()
-            st.text_area("", value=txt, height=220, key=f"tr_menu_sec_{i}")
-            copy_button(f"{title}をコピー", txt, key=f"copy_tr_menu_sec_{i}")
-
-
 def now_jst():
     return datetime.now(TZ)
 
@@ -1999,7 +1949,7 @@ def exercise_prescription_page(code_hash: str):
             st.error("AI提案に失敗: " + err)
         else:
             st.session_state["tr_menu_text"] = text
-            render_menu_blocks(text)
+            ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", text)
 
     if st.button("トレーニングログを保存", key="tr_inputs_save"):
         save_record(code_hash, "training_inputs",
@@ -2094,15 +2044,6 @@ def injury_page(code_hash: str):
             st.session_state["inj_ai_text"] = text
             ai_highlight_box("🩹 怪我AIコメント（保存されます）", text)
             st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
-# 以前生成したAIコメント（IDに紐づいて復元）
-if st.session_state.get("inj_ai_text"):
-    st.markdown("#### 🩹 怪我AIコメント（前回の続き）")
-    st.text_area("（コピーして共有OK）", value=st.session_state.get("inj_ai_text",""), height=220, key="inj_ai_view_prev")
-    copy_button("怪我コメントをコピー", st.session_state.get("inj_ai_text",""), key="copy_injury_ai_prev")
-    download_text_button("怪我コメントをTXTで保存", st.session_state.get("inj_ai_text",""), filename="injury_ai_comment.txt", key="dl_injury_ai_prev")
-    st.caption("コピーしたら、スマホのメモやLINEの『自分だけのトーク』に保存しておくと、翌日以降も見返しやすいです。")
-
-
 
     if st.button("怪我ログを保存", key="inj_save"):
         save_record(code_hash, "injury_log",
