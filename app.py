@@ -2001,16 +2001,16 @@ def exercise_prescription_page(code_hash: str):
         st.markdown("##### 📸 内容メモの写真（練習メニューのボードなど）")
         photos_key = "tr_photos"
         st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
-        st.session_state.setdefault("tr_thumb_w", 88)
 
         # 入力UIは場所を取るので折りたたみ（食事管理と同じ方式）
-        with st.expander("📸 写真を追加（カメラ/アルバム）", expanded=False):
-                        up = st.file_uploader(
+        with st.expander("📸 写真を追加／保存", expanded=False):
+            up = st.file_uploader(
                 "写真を追加（カメラ/アルバム）",
                 type=["jpg", "jpeg", "png", "heic", "heif"],
                 accept_multiple_files=False,
                 key="tr_memo_uploader",
             )
+
             if st.button("写真を追加", key="tr_add_photo"):
                 if up is None:
                     st.warning("写真がありません。")
@@ -2030,10 +2030,10 @@ def exercise_prescription_page(code_hash: str):
                         st.success("写真を追加しました。")
                         st.rerun()
 
-        # サムネイル表示（食事管理と同じ：小さく、最大3枚）＋「画像を開く」＋「拡大」
+        # サムネイル表示（小さく、最大3枚）＋「画像を開く」＋「拡大」
         photos = st.session_state.get(photos_key, [])
         if photos:
-            st.caption("追加済み写真（最新3枚） ※「画像を開く」または「拡大」で表示")
+            st.caption("追加済み写真（最新3枚）")
             show = photos[-3:]
             cols = st.columns(len(show))
             import base64 as _b64
@@ -2044,6 +2044,7 @@ def exercise_prescription_page(code_hash: str):
                     cols[i].image(b, width=88)
                 except Exception:
                     cols[i].write("（画像）")
+
                 cols[i].markdown(
                     f'<div style="text-align:center; margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">画像を開く</a></div>',
                     unsafe_allow_html=True,
