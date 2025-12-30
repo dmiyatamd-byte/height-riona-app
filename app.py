@@ -1665,7 +1665,7 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
     if allow_photo:
         st.caption("基本：写真 → AI解析（必要な時だけ開いてください）")
         with st.expander("📸 写真を追加／解析", expanded=False):
-            cap = st.camera_input("写真を撮る", key=f"{prefix}_camera")
+            cap = st.file_uploader("写真を追加（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=False, key=f"{prefix}_uploader")
             up = st.file_uploader("写真を選ぶ（アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_file")
 
             chosen = cap if cap is not None else up
@@ -2004,7 +2004,7 @@ def exercise_prescription_page(code_hash: str):
         # 入力（camera_input）は場所を取るので折りたたみ
         with st.expander("写真を追加", expanded=False):
             thumb_w = st.slider("サムネイルサイズ", min_value=70, max_value=160, value=int(st.session_state.get("tr_thumb_w", 88)), step=5, key="tr_thumb_w")
-            cam = st.camera_input("撮影（保存用）", key="tr_memo_cam")
+            cam = st.file_uploader("写真を追加（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=False, key="tr_memo_uploader")
 
             cP1, cP2 = st.columns([1,1])
             with cP1:
