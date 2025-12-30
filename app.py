@@ -437,6 +437,25 @@ def ai_highlight_box(title: str, text: str):
         unsafe_allow_html=True,
     )
 
+
+def normalize_training_headings(text: str) -> str:
+    """Normalize headings in AI training menu so '上半身/下半身/体幹/4週間' show with same font size.
+    ai_highlight_box uses HTML, so we inject small HTML heading blocks."""
+    if not text:
+        return text
+    heads = ["上半身", "下半身", "体幹", "4週間の進め方", "４週間の進め方", "４週間", "4週間"]
+    lines = (text or "").splitlines()
+    out = []
+    for ln in lines:
+        s = ln.strip()
+        s_clean = s.lstrip("-•・ ").strip("【】[]()（）:：")
+        if s_clean in heads:
+            out.append(f'<div style="font-weight:800;font-size:17px;margin:10px 0 6px 0;">{s_clean}</div>')
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
 def saved_ai_footer(items):
     """Footer area where saved comments are shown + copy buttons."""
     st.markdown("---")
@@ -2010,8 +2029,8 @@ def exercise_prescription_page(code_hash: str):
         if err:
             st.error("AI提案に失敗: " + err)
         else:
-            st.session_state["tr_menu_text"] = text
             text = normalize_training_headings(text)
+            st.session_state["tr_menu_text"] = text
             ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", text)
 
 
@@ -2247,12 +2266,7 @@ def sleep_page(code_hash: str):
     # -----------------
     # サッカー動画（YouTube検索）
     # -----------------
-    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
-    saved_ai_footer([
-        {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
-    ])
-
 
 def soccer_video_page(code_hash: str):
     st.subheader("🎥 サッカー動画")
