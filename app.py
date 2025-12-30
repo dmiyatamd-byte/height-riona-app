@@ -2126,47 +2126,118 @@ def injury_page(code_hash: str):
 
 def sleep_page(code_hash: str):
     st.subheader("😴 睡眠")
+
     sport = st.session_state.get("sport", SPORTS[0])
-    st.markdown("### 睡眠")
-    wake = st.time_input("起床時刻", value=time(6,0))
-    sleep_h = st.number_input("昨日の睡眠時間（時間）", 0.0, 16.0, 8.0, 0.25)
-    screen = st.number_input("就寝前のスマホ・ゲーム時間（分）", 0, 300, 60, 5)
-    score = 100
-    if sleep_h < 8.0:
-        score -= 20
-    if screen >= 90:
-        score -= 15
-    score = max(0, min(100, score))
-    st.write(f"睡眠スコア（簡易）：{score}/100")
-    # AIによる睡眠アドバイス（任意）
+
+    st.markdown("### 昨日の睡眠")
+
+    # --- 入力 ---
+    sleep_h = st.number_input(
+        "睡眠時間（時間）",
+        0.0, 16.0, 8.0, 0.25,
+        help="成長期は8〜10時間が目安です"
+    )
+
+    wake_quality = st.selectbox(
+        "今朝の目覚めはどうだった？",
+        ["😴 まだ眠い", "😐 まあまあ", "🙂 すっきり", "😄 とても良い"],
+        help="起きたときの回復感を直感で選んでください"
+    )
+
+    screen = st.number_input(
+        "就寝前のスマホ・ゲーム時間（分）",
+        0, 300, 60, 5
+    )
+
+    # --- スコア計算 ---
+    WAKE_SCORE = {
+        "😴 まだ眠い": 5,
+        "😐 まあまあ": 10,
+        "🙂 すっきり": 15,
+        "😄 とても良い": 20,
+    }
+
+    score = 0
+
+    # 睡眠時間（最大40点）
+    if sleep_h >= 9:
+        score += 40
+    elif sleep_h >= 8:
+        score += 35
+    elif sleep_h >= 7:
+        score += 25
+    else:
+        score += 15
+
+    # 目覚め（最大20点）
+    score += WAKE_SCORE[wake_quality]
+
+    # スクリーン時間（最大40点）
+    if screen <= 30:
+        score += 40
+    elif screen <= 60:
+        score += 30
+    elif screen <= 90:
+        score += 20
+    else:
+        score += 10
+
+    score = int(max(0, min(100, score)))
+
+    st.metric("睡眠スコア", f"{score} / 100")
+
+    # --- AIアドバイス ---
     if st.button("AIで睡眠アドバイスを作る", key="sl_ai_make"):
         system = (
             "You are a sports medicine clinician and youth athlete performance coach. "
-            "Give practical, safe, and actionable sleep advice for a junior soccer athlete. "
-            "Use short Japanese bullets. Avoid long lectures. "
-            "Include: (1) 評価（良い点/課題）, (2) 今日からできる改善3つ, "
-            "(3) 就寝前ルーティン例, (4) 明日の練習/試合に向けたポイント."
+            "Give practical, safe, and kind sleep advice in Japanese. "
+            "Use short bullets."
         )
-        user = f"起床時刻: {wake}\n睡眠時間: {sleep_h}時間\n就寝前スクリーン: {screen}分\n睡眠スコア(簡易): {score}/100"
-        out, err = ai_text(system, user)
+        user = f"""
+競技: {sport}
+睡眠時間: {sleep_h}時間
+起床時の目覚め: {wake_quality}
+就寝前スクリーン時間: {screen}分
+睡眠スコア: {score}/100
+
+要件:
+- 1) 評価（良い点）
+- 2) 気になる点
+- 3) 今日からできる改善を2〜3個
+- 4) 明日の練習・試合への一言
+文章はやさしく、子どもにも分かる表現で。
+"""
+
+        text, err = ai_text(system, user)
         if err:
-            st.error("AIに失敗: " + err)
-            out = (
-                f"・睡眠時間は{sleep_h}時間。成長期は8〜10時間を目安にしましょう。\n"
-                f"・就寝前スクリーンは{screen}分。可能なら就寝60分前からオフ。\n"
-                "・朝は起床後に光を浴び、同じ起床時刻を維持すると整いやすいです。"
-            )
-        st.session_state["sl_ai_text"] = out
+            st.error("AIに失敗しました")
+        else:
+            st.session_state["sl_ai_text"] = text
 
     if st.session_state.get("sl_ai_text"):
-        ai_highlight_box("😴 睡眠AIアドバイス（保存されます）", st.session_state.get("sl_ai_text",""))
-        st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
+        ai_highlight_box("😴 睡眠AIアドバイス（保存されます）", st.session_state["sl_ai_text"])
+        st.caption("※コピーやTXT保存はページ最下部の『保存したAIコメント』から行えます。")
 
+    # --- 保存 ---
     if st.button("睡眠ログを保存", key="sl_save"):
-        save_record(code_hash, "sleep_log",
-                    {"wake": str(wake), "sleep_h": float(sleep_h), "screen": int(screen), "score": int(score)},
-                    {"summary": "sleep_log"})
+        save_record(
+            code_hash,
+            "sleep_log",
+            {
+                "sleep_h": float(sleep_h),
+                "wake_quality": wake_quality,
+                "screen": int(screen),
+                "score": score,
+            },
+            {"summary": "sleep_log"}
+        )
+        update_streak_on_save(code_hash)
         st.success("保存しました。")
+
+    # --- 保存済みAIコメント ---
+    saved_ai_footer([
+        {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
+    ])
 
 
 
