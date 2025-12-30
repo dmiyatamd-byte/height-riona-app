@@ -1616,14 +1616,15 @@ def eval_ratio(actual: float, target: float) -> str:
 
 
 
-def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
+def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict, show_title: bool = True, show_thumbs: bool = True):
     """
     食事1回分の入力（スマホ優先）
     - 基本：写真（カメラ/アルバム）→AI解析
     - 写真が無理 / 伝わらない時だけ「量を記入（手入力）」を開く（隠しUI）
     - 写真は上書きではなく追加（最新3枚を保持）
     """
-    st.markdown(f"#### {title}")
+    if show_title:
+        st.markdown(f"#### {title}")
 
     # state
     ai = st.session_state.get(f"{prefix}_ai")
@@ -1698,22 +1699,24 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
                             st.rerun()
 
     # --- サムネ表示（常時：小さく）---
-    photos = st.session_state.get(photos_key, [])
-    if photos:
-        st.caption("保存済み（最新3枚）")
-        cols = st.columns(min(3, len(photos)))
-        for i, item in enumerate(reversed(photos[-3:])):
-            b64 = item.get("b64", "")
-            data_url = "data:image/jpeg;base64," + b64
-            with cols[i]:
-                try:
-                    st.image(base64.b64decode(b64), width=120)
-                except Exception:
-                    st.write("画像")
-                st.markdown(
-                    f'<a href="{data_url}" target="_blank" rel="noopener noreferrer">画像を開く</a>',
-                    unsafe_allow_html=True
-                )
+    if show_thumbs:
+        photos = st.session_state.get(photos_key, [])
+        if photos:
+            st.caption("保存済み（最新3枚）")
+            cols = st.columns(min(3, len(photos)))
+            for i, item in enumerate(reversed(photos[-3:])):
+                b64 = item.get("b64", "")
+                data_url = "data:image/jpeg;base64," + b64
+                with cols[i]:
+                    try:
+                        st.image(base64.b64decode(b64), width=120)
+                    except Exception:
+                        st.write("画像")
+                    st.markdown(
+                        f'<a href="{data_url}" target="_blank" rel="noopener noreferrer">画像を開く</a>',
+                        unsafe_allow_html=True
+                    )
+
 
     if ai:
         st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')}（信頼度 {ai.get('confidence',0):.2f}）")
@@ -1834,64 +1837,125 @@ def meal_page(code_hash: str):
 
 
 
-    with st.expander("朝食", expanded=True):
-        b = meal_block("b", "朝食", True, targets)
+    
+    st.markdown("### 今日の記録")
 
-    # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
-    with st.expander("昼食", expanded=False):
-        st.markdown("#### 昼食")
-        is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
-        if is_school:
-            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。メニューが分かれば入力してください。")
-            menu = st.text_area("メニュー（分かる範囲で）", key="l_menu", placeholder="例：ごはん、鶏の照り焼き、みそ汁、牛乳…")
-            lk = st.number_input("推定カロリー（kcal）", 0.0, 2000.0, value=650.0, step=10.0, key="l_kcal_simple")
-            lp = st.number_input("たんぱく質（g）", 0.0, 200.0, value=25.0, step=1.0, key="l_p_simple")
-            lc = st.number_input("炭水化物（g）", 0.0, 400.0, value=90.0, step=1.0, key="l_c_simple")
-            lf = st.number_input("脂質（g）", 0.0, 200.0, value=18.0, step=1.0, key="l_f_simple")
-            l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
-        else:
-            st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
-            l = meal_block("l", "昼食", True, targets)
-            l["mode"] = "normal"
+    def _meal_est_from_state(prefix: str):
+        # 給食モードの昼食は別管理
+        if prefix == "l" and st.session_state.get("l_is_school", True):
+            return {
+                "kcal": float(st.session_state.get("l_school_kcal", 0.0)),
+                "p": float(st.session_state.get("l_school_p", 0.0)),
+                "c": float(st.session_state.get("l_school_c", 0.0)),
+                "f": float(st.session_state.get("l_school_f", 0.0)),
+            }
+        ai = st.session_state.get(f"{prefix}_ai") or {}
+        c_level = ai.get("carb") or st.session_state.get(f"{prefix}_c", "普")
+        p_level = ai.get("protein") or st.session_state.get(f"{prefix}_p", "普")
+        v_level = ai.get("veg") or st.session_state.get(f"{prefix}_v", "普")
+        fried = bool(ai.get("fried_or_oily", st.session_state.get(f"{prefix}_fried", False)))
+        dairy = bool(ai.get("dairy", st.session_state.get(f"{prefix}_dairy", False)))
+        fruit = bool(ai.get("fruit", st.session_state.get(f"{prefix}_fruit", False)))
+        return meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
 
-        # 昼食のAIコメント（しっかり）
-        if st.button("昼食のAIコメント（しっかり）", key="l_ai_comment_btn"):
-            # 目標との差分を昼の一言に落とす
-            targets_local = targets  # meal_page内のtargetsを参照
-            # ここでは昼食単体と、昼までの累計でコメントを作る
-            p_l = float(l.get("p", 0.0) or 0.0)
-            c_l = float(l.get("c", 0.0) or 0.0)
-            f_l = float(l.get("f", 0.0) or 0.0)
-            k_l = float(l.get("kcal", 0.0) or 0.0)
-            menu_txt = l.get("menu", "") if isinstance(l, dict) else ""
-            system = "You are a sports nutrition coach for junior athletes. Output Japanese. Be specific with grams/portions. No long preface."
-            user = f"""目的: {goal}
-運動強度: {intensity}
-体重: {weight} kg
-1日の目標: kcal={targets_local['kcal']:.0f}, C={targets_local['c_g']:.0f}g, P={targets_local['p_g']:.0f}g, F={targets_local['f_g']:.0f}g
+    def _latest_photo(prefix: str):
+        photos = st.session_state.get(f"{prefix}_photos", []) or []
+        if not photos:
+            return None
+        return photos[-1].get("b64") or None
 
-昼食（推定）:
+    def _thumb_cell(prefix: str):
+        b64 = _latest_photo(prefix)
+        if not b64:
+            st.markdown("<div style='font-size:28px; line-height:1; padding-top:6px;'>📷</div>", unsafe_allow_html=True)
+            st.caption("写真なし")
+            return
+        try:
+            st.image(base64.b64decode(b64), width=64)
+        except Exception:
+            st.write("画像")
+        data_url = "data:image/jpeg;base64," + b64
+        st.markdown(
+            f'<a href="{data_url}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">開く</a>',
+            unsafe_allow_html=True
+        )
+
+    def _chips(est: dict):
+        # 小さめチップ表示
+        st.markdown(
+            f"""<div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:2px;">
+            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">P {est.get('p',0):.0f}g</span>
+            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">C {est.get('c',0):.0f}g</span>
+            <span style="border:1px solid #e5e7eb; padding:2px 8px; border-radius:999px; font-size:12px;">F {est.get('f',0):.0f}g</span>
+            </div>""",
+            unsafe_allow_html=True
+        )
+
+    def render_meal_card(prefix: str, title: str, expanded: bool = False):
+        est_preview = _meal_est_from_state(prefix)
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 3])
+            with c1:
+                _thumb_cell(prefix)
+            with c2:
+                st.markdown(f"**{title}**")
+                st.markdown(f"<div style='font-size:20px; font-weight:700; margin-top:-2px;'>{est_preview.get('kcal',0):.0f} kcal</div>", unsafe_allow_html=True)
+                _chips(est_preview)
+
+            with st.expander("記録を追加・修正", expanded=expanded):
+                if prefix == "l":
+                    st.markdown("#### 昼食")
+                    is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
+                    if is_school:
+                        # 給食は簡易：目標の1/3〜0.4相当を目安に入力（ざっくり）
+                        default_k = float(targets.get("kcal", 0)) * 0.35
+                        k_l = st.number_input("給食カロリー（推定）", 0.0, 2000.0, value=float(st.session_state.get("l_school_kcal", default_k)), step=10.0, key="l_school_kcal")
+                        p_l = st.number_input("たんぱく質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_p", targets.get("p_g",0)*0.30)), step=1.0, key="l_school_p")
+                        c_l = st.number_input("炭水化物（g）", 0.0, 400.0, value=float(st.session_state.get("l_school_c", targets.get("c_g",0)*0.35)), step=1.0, key="l_school_c")
+                        f_l = st.number_input("脂質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_f", targets.get("f_g",0)*0.35)), step=1.0, key="l_school_f")
+                        st.session_state["l_school_kcal"] = float(k_l)
+                        st.session_state["l_school_p"] = float(p_l)
+                        st.session_state["l_school_c"] = float(c_l)
+                        st.session_state["l_school_f"] = float(f_l)
+
+                        if st.button("AIで昼食コメント", key="l_ai_comment_btn"):
+                            system = "あなたはスポーツ栄養の専門家です。日本語で簡潔に。"
+                            menu_txt = st.text_input("給食メニュー（分かる範囲で）", value=st.session_state.get("l_school_menu",""), key="l_school_menu")
+                            user = f"""昼食（給食）:
 - kcal: {k_l:.0f}
 - C/P/F: {c_l:.0f}g / {p_l:.0f}g / {f_l:.0f}g
-- メニュー: {menu_txt if menu_txt else "不明（写真/入力ベース）"}
+- メニュー: {menu_txt if menu_txt else "不明"}
+今日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
 お願い:
-- 昼食の評価（良い点/改善点）を短く
-- 今日は“夕食でどう帳尻を合わせるか”を具体量で提案（例：ごはん何g、肉/魚何g、牛乳/ヨーグルト量）
-- もし不足が大きければ、間食案（1〜2個）も提案（コンビニで買えるレベル）
-- 文章は見出し＋箇条書き中心で、読みやすく
+- 昼食の良い点/改善点を短く
+- 夕食での帳尻合わせを具体量で提案（ごはん何g、肉/魚何gなど）
+- 文章は見出し＋箇条書き中心で読みやすく
 """
-            text, err = ai_text(system, user)
-            if err:
-                st.error("AIコメントに失敗: " + err)
-            else:
-                st.session_state["l_ai_comment_text"] = text
-        if st.session_state.get("l_ai_comment_text"):
-            ai_highlight_box("昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
+                            text, err = ai_text(system, user)
+                            if err:
+                                st.error("AIコメントに失敗: " + err)
+                            else:
+                                st.session_state["l_ai_comment_text"] = text
 
-    with st.expander("夕食", expanded=True):
+                        if st.session_state.get("l_ai_comment_text"):
+                            st.markdown("##### AIコメント")
+                            st.write(st.session_state.get("l_ai_comment_text"))
+                        # 給食モードはここで完了
+                        return {"kcal": float(k_l), "p": float(p_l), "c": float(c_l), "f": float(f_l)}
+                    else:
+                        est = meal_block("l", "昼食", True, targets, show_title=False, show_thumbs=True)
+                        return est
 
-        d = meal_block("d", "夕食", True, targets)
+                est = meal_block(prefix, title, True, targets, show_title=False, show_thumbs=True)
+                return est
 
+        return est_preview
+
+    # --- 3食 + 間食（カードUI）---
+    b = render_meal_card("b", "朝食", expanded=True)
+    l = render_meal_card("l", "昼食", expanded=False)
+    d = render_meal_card("d", "夕食", expanded=False)
+    s = render_meal_card("s", "間食", expanded=False)
     tot_p = b["p"] + l["p"] + d["p"]
     tot_c = b["c"] + l["c"] + d["c"]
     tot_f = b["f"] + l["f"] + d["f"]
