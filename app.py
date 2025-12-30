@@ -850,7 +850,7 @@ def auto_fill_latest_all_tabs(code_hash: str):
     for kind, keys in [
         ("height_draft", ["h_desired","h_date_y1","h_date_y2","h_date_y3","h_y1","h_y2","h_y3","h_w1","h_w2","h_w3","h_alp","h_ba","h_igf1","h_t","h_e2"]),
         ("anemia_draft", ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end_test_type"]),
-        ("meal_draft", ["meal_goal","meal_intensity","meal_weight","b_c","b_p","b_v","l_c","l_p","l_v","d_c","d_p","d_v"]),
+        ("meal_draft", ["meal_goal","meal_diet_mode","meal_intensity","meal_weight","b_c","b_p","b_v","l_c","l_p","l_v","d_c","d_p","d_v"]),
     ]:
         try:
             pl = load_snapshot(code_hash, kind)
@@ -1537,19 +1537,41 @@ def kyushoku_template(age_years: float):
     return {"p":30.0,"c":105.0,"f":22.0,"kcal":750.0}
 
 def compute_targets_pfc(weight_kg: float, age_years: float, sport: str, intensity: str, goal: str):
+    """1日の目標PFCをざっくり算出。
+    goal は UI表示の3種（増量/維持/回復）に加えて、内部用に「ダイエット」も扱う。
+    """
     if weight_kg <= 0:
         return None
+
+    # ざっくりの基礎（kcal/kg/日）
     base = 45.0 if age_years < 12 else (50.0 if age_years < 15 else 48.0)
-    sport_factor = {"サッカー":1.05,"ラグビー":1.10,"野球":1.00,"テニス":1.00,"水泳":1.08}.get(sport,1.0)
-    intensity_factor = {"低":0.95,"中":1.00,"高":1.10}.get(intensity,1.0)
-    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03}.get(goal,1.0)
-    kcal = weight_kg * base * sport_factor * intensity_factor * goal_factor
-    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0}.get(goal,1.6)
+
+    sport_factor = {"サッカー": 1.05, "ラグビー": 1.10, "野球": 1.00, "テニス": 1.00, "水泳": 1.08}.get(sport, 1.0)
+    intensity_factor = {"低": 0.95, "中": 1.00, "高": 1.10}.get(intensity, 1.0)
+
+    # まず「維持」相当を計算
+    kcal_maint = weight_kg * base * sport_factor * intensity_factor * 1.00
+
+    if goal == "ダイエット":
+        # 目標：-2kg/月 ≒ -0.5kg/週 ≒ -500kcal/日（概算）
+        kcal = kcal_maint - 500.0
+
+        # 成長期の下げすぎを避ける下限（ざっくり）
+        kcal_floor = max(1200.0, weight_kg * 30.0)
+        kcal = max(kcal, kcal_floor)
+
+        p_perkg = 1.8  # 筋量維持優先
+        f_pct = 0.25
+    else:
+        goal_factor = {"増量": 1.08, "維持": 1.00, "回復": 1.03}.get(goal, 1.0)
+        kcal = weight_kg * base * sport_factor * intensity_factor * goal_factor
+        p_perkg = {"増量": 1.8, "維持": 1.6, "回復": 2.0}.get(goal, 1.6)
+        f_pct = 0.25 if goal in ["増量", "維持"] else 0.28
+
     p_g = p_perkg * weight_kg
-    f_pct = 0.25 if goal in ["増量","維持"] else 0.28
     f_g = (kcal * f_pct) / 9.0
-    c_g = max(0.0, kcal - p_g*4.0 - f_g*9.0) / 4.0
-    return {"kcal":kcal, "p_g":p_g, "c_g":c_g, "f_g":f_g}
+    c_g = max(0.0, kcal - p_g * 4.0 - f_g * 9.0) / 4.0
+    return {"kcal": kcal, "p_g": p_g, "c_g": c_g, "f_g": f_g}
 
 def eval_ratio(actual: float, target: float) -> str:
     if target <= 0:
@@ -1707,19 +1729,29 @@ def meal_page(code_hash: str):
 
     top = st.columns(4)
     goal = top[0].selectbox("目的", ["増量","維持","回復"], index=1, key="meal_goal")
+    # ※「ダイエット」は目的の選択肢には表示しない（必要な時だけ詳細設定でON）
+    with st.expander("詳細設定（必要なときだけ）", expanded=False):
+        st.checkbox("減量モード（-2kg/月を目標）", key="meal_diet_mode",
+                help="目的の選択肢には表示しません。ONのとき、維持計算から約-500kcal/日を目安に調整します。")
+
+    goal_internal = "ダイエット" if st.session_state.get("meal_diet_mode") else goal
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
     weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
 
     st.session_state["latest_weight_kg"] = float(weight)
 
-    targets = compute_targets_pfc(weight, age_years, sport, intensity, goal)
+    targets = compute_targets_pfc(weight, age_years, sport, intensity, goal_internal)
     st.markdown("### 目標（P/F/C）")
     t1,t2,t3,t4 = st.columns(4)
     t1.metric("炭水化物", f"{targets['c_g']:.0f} g")
     t2.metric("たんぱく質", f"{targets['p_g']:.0f} g")
     t3.metric("脂質", f"{targets['f_g']:.0f} g")
     t4.metric("総カロリー", f"{targets['kcal']:.0f} kcal")
+
+if st.session_state.get("meal_diet_mode"):
+    st.info("減量モード：-2kg/月を目標に、維持推定から約-500kcal/日を目安に調整しています。"
+            "（成長期のため、極端な制限にならないよう下限も設定）")
 
 
     with st.expander("朝食", expanded=True):
@@ -1850,7 +1882,7 @@ def meal_page(code_hash: str):
         else:
             st.info("保存データがありません。")
     if st.button("保存", key="meal_save_bottom"):
-        keys = ["meal_goal","meal_intensity","meal_weight","b_c","b_p","b_v","b_dairy","b_fruit","b_fried","l_kyu","l_c","l_p","l_v","l_dairy","l_fruit","l_fried","d_c","d_p","d_v","d_dairy","d_fruit","d_fried"]
+        keys = ["meal_goal","meal_diet_mode","meal_intensity","meal_weight","b_c","b_p","b_v","b_dairy","b_fruit","b_fried","l_kyu","l_c","l_p","l_v","l_dairy","l_fruit","l_fried","d_c","d_p","d_v","d_dairy","d_fruit","d_fried"]
         save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
