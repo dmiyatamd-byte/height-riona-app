@@ -688,6 +688,89 @@ def load_snapshot(code_hash: str, kind: str):
     except Exception:
         return None
 
+
+# =========================
+# Global Weight Sync (profile -> all tabs)
+# =========================
+WEIGHT_KEYS = ["pf_weight", "meal_weight", "tr_weight", "h_w3"]
+
+def _get_profile_snapshot(code_hash: str) -> dict:
+    return load_snapshot(code_hash, "profile") or {}
+
+def _get_profile_weight_kg_from_snapshot(prof: dict) -> float:
+    for k in ("weight_kg", "weight", "wt"):
+        v = prof.get(k)
+        if v is None:
+            continue
+        try:
+            w = float(v)
+            if 10.0 <= w <= 200.0:
+                return w
+        except Exception:
+            pass
+    return 0.0
+
+def _set_profile_weight_kg_in_snapshot(code_hash: str, w: float):
+    prof = _get_profile_snapshot(code_hash)
+    prof["weight_kg"] = float(w)
+    save_snapshot(code_hash, "profile", prof)
+
+def _is_manual(key: str) -> bool:
+    return bool(st.session_state.get(f"{key}__manual", False))
+
+def _mark_manual(key: str):
+    st.session_state[f"{key}__manual"] = True
+
+def _set_global_weight(code_hash: str, w: float, *, write_back_profile: bool = True):
+    """Update global weight (profile_weight_kg) and propagate to non-manual tab weights."""
+    try:
+        w = float(w)
+    except Exception:
+        return
+    if not (10.0 <= w <= 200.0):
+        return
+
+    st.session_state["profile_weight_kg"] = w
+    st.session_state["latest_weight_kg"] = w  # backward-compat
+
+    # propagate to other tab keys if they are not manual
+    for k in WEIGHT_KEYS:
+        if k == "pf_weight":
+            # pf_weight is the profile editor widget; don't force-set it here (avoid widget key conflicts)
+            continue
+        if not _is_manual(k):
+            st.session_state[k] = w
+
+    if write_back_profile:
+        _set_profile_weight_kg_in_snapshot(code_hash, w)
+
+def _sync_weight_defaults_before_render(code_hash: str, *, fallback: float = 45.0):
+    """Call this early in main() before routing/UI to ensure all tabs use profile weight as baseline."""
+    prof = _get_profile_snapshot(code_hash)
+    w_prof = _get_profile_weight_kg_from_snapshot(prof)
+    if w_prof <= 0:
+        w_prof = float(st.session_state.get("profile_weight_kg") or 0) or fallback
+
+    # set global weight if not already set
+    if float(st.session_state.get("profile_weight_kg") or 0) <= 0:
+        st.session_state["profile_weight_kg"] = w_prof
+    st.session_state["latest_weight_kg"] = float(st.session_state["profile_weight_kg"])
+
+    # seed widget keys BEFORE they are created (safe). If a key was manually edited, keep it.
+    for k in WEIGHT_KEYS:
+        if k not in st.session_state or float(st.session_state.get(k) or 0) <= 0:
+            st.session_state[k] = float(st.session_state["profile_weight_kg"])
+        elif (not _is_manual(k)) and k != "pf_weight":
+            # keep in sync for auto-derived keys
+            st.session_state[k] = float(st.session_state["profile_weight_kg"])
+
+def _weight_on_change(code_hash: str, key: str, *, write_back_profile: bool = True):
+    """on_change callback for weight inputs."""
+    _mark_manual(key)
+    w = st.session_state.get(key)
+    _set_global_weight(code_hash, w, write_back_profile=write_back_profile)
+
+
 def save_record(code_hash: str, kind: str, payload: dict, result: dict):
     conn = data_db()
     conn.execute(
@@ -1213,7 +1296,10 @@ def height_page(code_hash: str):
         st.session_state["h_date_y3"] = v
     d3 = col3.date_input("測定日 最新（任意）", key="h_date_y3")
     h3 = col3.number_input("身長 最新(cm)", 0.0, 230.0, 0.0, 0.1, key="h_y3")
-    w3 = col3.number_input("体重 最新(kg)", 0.0, 200.0, 0.0, 0.1, key="h_w3")
+    w3 = col3.number_input("体重 最新(kg)", 0.0, 200.0,
+                        value=float(st.session_state.get("h_w3") or st.session_state.get("profile_weight_kg") or 0.0),
+                        step=0.1, key="h_w3",
+                        on_change=lambda: _weight_on_change(code_hash, "h_w3", write_back_profile=False))
 
     pts_age, pts_h = [], []
     if nz(h1): pts_age.append(max(age-2,0)); pts_h.append(float(h1))
@@ -1787,10 +1873,13 @@ def meal_page(code_hash: str):
     top = st.columns(4)
     goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
-    weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
+    weight = top[2].number_input("体重（kg）", 20.0, 150.0,
+                              value=float(st.session_state.get("meal_weight") or st.session_state.get("profile_weight_kg") or 45.0),
+                              step=0.1, key="meal_weight",
+                              on_change=lambda: _weight_on_change(code_hash, "meal_weight", write_back_profile=True))
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
 
-    st.session_state["latest_weight_kg"] = float(weight)
+    _set_global_weight(code_hash, weight, write_back_profile=True)
 
     targets = compute_targets_pfc(weight, age_years, sport, intensity, goal)
     if goal == "ダイエット":
@@ -2138,9 +2227,10 @@ def exercise_prescription_page(code_hash: str):
     st.caption("体重や筋力の情報から、上半身・下半身・体幹をバランスよく提案します。")
 
     w = st.number_input("体重（kg）", min_value=20.0, max_value=150.0,
-                        value=float(st.session_state.get("latest_weight_kg", 45.0) or 45.0),
-                        step=0.1, key="tr_weight")
-    st.session_state["latest_weight_kg"] = float(w)
+                        value=float(st.session_state.get("tr_weight") or st.session_state.get("profile_weight_kg") or 45.0),
+                        step=0.1, key="tr_weight",
+                        on_change=lambda: _weight_on_change(code_hash, "tr_weight", write_back_profile=True))
+    _set_global_weight(code_hash, w, write_back_profile=True)
 
     bench1rm = st.number_input("ベンチプレス最大（推定1回の重さ kg・任意）", min_value=0.0, max_value=300.0,
                                value=float(st.session_state.get("tr_bench1rm", 0.0) or 0.0),
@@ -2517,14 +2607,19 @@ def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
     elif sex == "女":
         st.session_state["sex_code"] = "F"
 
-    # defaults for weight/height used by multiple pages (do not overwrite if user already set this session)
+    # defaults for weight/height used by multiple pages
     try:
         w = float(prof.get("weight_kg") or 0.0)
     except Exception:
         w = 0.0
-    if ("latest_weight_kg" not in st.session_state) or float(st.session_state.get("latest_weight_kg") or 0.0) <= 0.0:
-        if w > 0:
-            st.session_state["latest_weight_kg"] = w
+    if w > 0:
+        if float(st.session_state.get("profile_weight_kg") or 0.0) <= 0.0:
+            st.session_state["profile_weight_kg"] = w
+        st.session_state["latest_weight_kg"] = float(st.session_state.get("profile_weight_kg") or w)
+        # seed tab weights (only if not manually edited)
+        for k in WEIGHT_KEYS:
+            if k not in st.session_state or float(st.session_state.get(k) or 0.0) <= 0.0:
+                st.session_state[k] = float(st.session_state["profile_weight_kg"])
 
     try:
         h = float(prof.get("height_cm") or 0.0)
@@ -2664,6 +2759,9 @@ def main():
             _sync_profile_to_session(code_hash, prof)
     except Exception:
         pass
+
+    # 体重は個人情報を“唯一の基礎値”として全タブへ同期（ウィジェット生成前）
+    _sync_weight_defaults_before_render(code_hash)
 
     # ルーティング初期化：基礎情報が未登録ならトップへ
     if "route" not in st.session_state or not st.session_state.get("route"):
