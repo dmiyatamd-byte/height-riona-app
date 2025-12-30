@@ -1913,10 +1913,7 @@ def meal_page(code_hash: str):
                         p_l = st.number_input("たんぱく質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_p", targets.get("p_g",0)*0.30)), step=1.0, key="l_school_p")
                         c_l = st.number_input("炭水化物（g）", 0.0, 400.0, value=float(st.session_state.get("l_school_c", targets.get("c_g",0)*0.35)), step=1.0, key="l_school_c")
                         f_l = st.number_input("脂質（g）", 0.0, 200.0, value=float(st.session_state.get("l_school_f", targets.get("f_g",0)*0.35)), step=1.0, key="l_school_f")
-                        st.session_state["l_school_p"] = float(p_l)
-                        st.session_state["l_school_c"] = float(c_l)
-                        st.session_state["l_school_f"] = float(f_l)
-
+                                                                        
                         if st.button("AIで昼食コメント", key="l_ai_comment_btn"):
                             system = "あなたはスポーツ栄養の専門家です。日本語で簡潔に。"
                             menu_txt = st.text_input("給食メニュー（分かる範囲で）", value=st.session_state.get("l_school_menu",""), key="l_school_menu")
