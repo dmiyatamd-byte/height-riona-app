@@ -1232,17 +1232,6 @@ def height_page(code_hash: str):
         save_snapshot(code_hash, "height_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
-    if st.button("結果保存（身長）", key="h_result_save"):
-        save_record(code_hash, "height_result", {
-            "desired_cm": desired, "alp": alp, "ba": ba, "igf1": igf1,
-            "testosterone": testosterone, "estradiol": estradiol,
-            "date_y1": d1, "date_y2": d2, "date_y3": d3,
-            "h_y1": h1, "h_y2": h2, "h_y3": h3,
-            "w_y1": w1, "w_y2": w2, "w_y3": w3,
-            "pred_cm": pred, "type": type_jp
-        }, {"summary":"height_result"})
-        st.success("保存しました。")
-
 def tsat_from_fe_tibc(fe, tibc):
     if fe is None or tibc is None or tibc <= 0:
         return None
@@ -1625,7 +1614,7 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
             if err:
                 st.error(err)
             else:
-                st.image(chosen, caption="取り込み画像", use_container_width=True)
+                st.image(chosen, caption="取り込み画像", width=200)
                 if st.button("AIで食事を解析する（主食/主菜/野菜）", type="primary", key=f"{prefix}_ai_btn"):
                     out, err2 = analyze_meal_photo(img_bytes, title)
                     if err2:
