@@ -269,63 +269,71 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 def now_jst():
     return datetime.now(TZ)
 
-# =========================
-# Duolingo-like motivation (missions / streak)
-# =========================
 
-MISSION_TASKS = [
-    ("training", "📝 トレーニングを記録"),
-    ("meal", "🍽 食事を記録"),
-    ("sleep", "😴 睡眠を記録"),
+# =========================
+# Streak & Medal (Duolingo-like)
+# =========================
+MEDALS = [
+    (30, "🏆 スペシャル"),
+    (14, "🥇 ゴールド"),
+    (7,  "🥈 シルバー"),
+    (3,  "🥉 ブロンズ"),
 ]
 
-def _mission_kind_for_date(d: date) -> str:
-    return f"daily_mission::{d.isoformat()}"
+def calc_medal(streak: int) -> str:
+    for days, name in MEDALS:
+        if streak >= days:
+            return name
+    return "—"
 
-def load_daily_mission(code_hash: str, d: date):
-    return load_snapshot(code_hash, _mission_kind_for_date(d)) or {}
+def update_streak_on_save(code_hash: str):
+    """Call this after any daily 'save' action (training/meal/sleep/injury).
+    Stores streak and medal in snapshots so it persists across days/devices."""
+    try:
+        today = now_jst().date().isoformat()
+        last = load_snapshot(code_hash, "streak_last_date")
+        streak = int(load_snapshot(code_hash, "streak_count") or 0)
 
-def save_daily_mission(code_hash: str, d: date, payload: dict):
-    save_snapshot(code_hash, _mission_kind_for_date(d), payload)
+        if last == today:
+            pass
+        else:
+            if last:
+                try:
+                    last_d = date.fromisoformat(str(last))
+                except Exception:
+                    last_d = None
+            else:
+                last_d = None
 
-def mark_mission_done(code_hash: str, task_key: str, d: date | None = None):
-    d = d or now_jst().date()
-    pl = load_daily_mission(code_hash, d)
-    done = set(pl.get("done", []))
-    done.add(task_key)
-    pl["done"] = sorted(done)
-    save_daily_mission(code_hash, d, pl)
+            if last_d and last_d == (now_jst().date() - timedelta(days=1)):
+                streak += 1
+            else:
+                streak = 1
 
-def compute_streak(code_hash: str, max_days: int = 120) -> int:
-    # consecutive days up to today with at least 1 completion
-    today = now_jst().date()
-    streak = 0
-    for i in range(max_days):
-        d = today - timedelta(days=i)
-        pl = load_daily_mission(code_hash, d)
-        if not pl or not pl.get("done"):
-            break
-        streak += 1
-    return streak
+            save_snapshot(code_hash, "streak_last_date", today)
+            save_snapshot(code_hash, "streak_count", streak)
 
-def render_daily_missions(code_hash: str):
-    today = now_jst().date()
-    pl = load_daily_mission(code_hash, today)
-    done = set(pl.get("done", []))
+        save_snapshot(code_hash, "streak_medal", calc_medal(streak))
+    except Exception:
+        # streak should never break core features
+        return
 
-    streak = compute_streak(code_hash)
-    col1, col2 = st.columns([2,1])
-    with col1:
-        st.markdown("### ✅ 今日のミッション")
-        completed = sum(1 for k, _ in MISSION_TASKS if k in done)
-        st.progress(completed/len(MISSION_TASKS))
-        for k, label in MISSION_TASKS:
-            checked = (k in done)
-            st.checkbox(label, value=checked, key=f"ms_{today.isoformat()}_{k}", disabled=True)
-    with col2:
-        st.markdown("### 🔥 連続")
-        st.metric("ストリーク", f"{streak} 日")
-        st.caption("1つでも入力できたらOK。続けるほど強くなる。")
+def render_streak_medal(code_hash: str):
+    streak = int(load_snapshot(code_hash, "streak_count") or 0)
+    medal  = load_snapshot(code_hash, "streak_medal") or "—"
+    st.markdown(
+        f"""
+        <div style="padding:12px 14px;border-radius:16px;
+                    background:#fff7ed;border:1px solid #fed7aa;">
+          <div style="font-size:16px;font-weight:700;">🔥 連続 {streak} 日</div>
+          <div style="font-size:18px;margin-top:6px;font-weight:600;">{medal}</div>
+          <div style="color:#666;font-size:13px;margin-top:4px;">
+            1日にどれか1つ記録できたらカウントされます
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 def iso(dt):
     return dt.astimezone(TZ).isoformat()
 
@@ -834,8 +842,7 @@ def auto_fill_latest_all_tabs(code_hash: str):
     st.session_state["_auto_filled_all"] = True
 
 def shared_demographics():
-    # JAMS logo shown once above Basic Info
-    jams_logo_header()      
+    jams_logo_header()
     st.markdown("### 基本情報")
 
     today = now_jst().date()
@@ -871,24 +878,24 @@ def shared_demographics():
         st.session_state["age_years"] = float(years_between(dob, today))
         st.caption(f"年齢（概算）：{st.session_state['age_years']:.1f}歳")
     st.divider()
-    # 保存/読込（縦並び）
-if st.button("基本情報を読み込み", key="basic_load"):
-    try:
-        ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-        if ok:
-            st.success("基本情報を読み込みました。")
-            st.rerun()
-        else:
-            st.info("保存済みの基本情報がありません。")
-    except Exception as e:
-        st.error(f"読み込みに失敗: {e}")
+    # 基本情報ボタン（縦並び：読み込み → 保存）
+    if st.button("基本情報を読み込み", key="basic_load"):
+        try:
+            ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+            if ok:
+                st.success("基本情報を読み込みました。")
+                st.rerun()
+            else:
+                st.info("保存済みの基本情報がありません。")
+        except Exception as e:
+            st.error(f"読み込みに失敗: {e}")
 
-if st.button("基本情報を保存", key="basic_save"):
-    try:
-        save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-        st.success("基本情報を保存しました。")
-    except Exception as e:
-        st.error(f"保存に失敗: {e}")
+    if st.button("基本情報を保存", key="basic_save"):
+        try:
+            save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+            st.success("基本情報を保存しました。")
+        except Exception as e:
+            st.error(f"保存に失敗: {e}")
 
 
 # =========================
@@ -1610,7 +1617,6 @@ def meal_page(code_hash: str):
         st.success("保存しました。")
 
     sport = st.session_state.get("sport", SPORTS[0])
-    render_daily_missions(code_hash)
     age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
@@ -1739,7 +1745,6 @@ def meal_page(code_hash: str):
                 st.caption("※日付ごとに最新の食事ログ評価を表示しています（直近約1ヶ月）。")
 
     if st.button("結果保存（食事ログ）", key="meal_save"):
-        mark_mission_done(code_hash, "meal")
         save_record(code_hash, "meal_day",
                     {"goal": goal, "intensity": intensity, "weight": weight, "targets": targets,
                      "breakfast": b, "lunch": l, "dinner": d,
@@ -1772,8 +1777,8 @@ def meal_page(code_hash: str):
 
 def exercise_prescription_page(code_hash: str):
     st.subheader("🏋️ 運動処方")
+    render_streak_medal(code_hash)
     sport = st.session_state.get("sport", SPORTS[0])
-    render_daily_missions(code_hash)
     # ---- Training log (per-user latest + history) ----
     with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
         st.session_state.setdefault("tr_date", now_jst().date())
@@ -1817,7 +1822,6 @@ def exercise_prescription_page(code_hash: str):
             if st.button("保存", key="tr_log_save"):
                 try:
                     save_training_latest(code_hash)
-                    mark_mission_done(code_hash, "training")
                     st.success("保存しました。")
                 except Exception as e:
                     st.error(f"保存に失敗: {e}")
@@ -2019,6 +2023,7 @@ def exercise_prescription_page(code_hash: str):
         # -----------------
         # 怪我
         # -----------------
+    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "tr_menu_text", "title": "🏋️ 運動処方：筋トレメニュー"},
@@ -2028,7 +2033,6 @@ def exercise_prescription_page(code_hash: str):
 def injury_page(code_hash: str):
     st.subheader("🩹 怪我")
     sport = st.session_state.get("sport", SPORTS[0])
-    render_daily_missions(code_hash)
     st.markdown("### 怪我のチェック")
     st.caption("痛む場所を選ぶと質問が増えます。最後にAIがコメントします。")
 
@@ -2113,6 +2117,7 @@ def injury_page(code_hash: str):
         # -----------------
         # 睡眠
         # -----------------
+    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "inj_ai_text", "title": "🩹 怪我：AIコメント"},
@@ -2122,7 +2127,6 @@ def injury_page(code_hash: str):
 def sleep_page(code_hash: str):
     st.subheader("😴 睡眠")
     sport = st.session_state.get("sport", SPORTS[0])
-    render_daily_missions(code_hash)
     st.markdown("### 睡眠")
     wake = st.time_input("起床時刻", value=time(6,0))
     sleep_h = st.number_input("昨日の睡眠時間（時間）", 0.0, 16.0, 8.0, 0.25)
@@ -2159,7 +2163,6 @@ def sleep_page(code_hash: str):
         st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
     if st.button("睡眠ログを保存", key="sl_save"):
-        mark_mission_done(code_hash, "sleep")
         save_record(code_hash, "sleep_log",
                     {"wake": str(wake), "sleep_h": float(sleep_h), "screen": int(screen), "score": int(score)},
                     {"summary": "sleep_log"})
@@ -2171,6 +2174,7 @@ def sleep_page(code_hash: str):
     # -----------------
     # サッカー動画（YouTube検索）
     # -----------------
+    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
@@ -2180,7 +2184,6 @@ def sleep_page(code_hash: str):
 def soccer_video_page(code_hash: str):
     st.subheader("🎥 サッカー動画")
     sport = st.session_state.get("sport", SPORTS[0])
-    render_daily_missions(code_hash)
     if sport != "サッカー":
         st.caption("このタブはサッカー選手向けです。競技がサッカーの場合に使ってください。")
     else:
@@ -2200,6 +2203,7 @@ def soccer_video_page(code_hash: str):
                 for q in queries[:5]:
                     url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
                     st.markdown(f"- [{q}]({url})")
+    jams_logo_footer()
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     premium_css()
