@@ -269,6 +269,63 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 def now_jst():
     return datetime.now(TZ)
 
+# =========================
+# Duolingo-like motivation (missions / streak)
+# =========================
+
+MISSION_TASKS = [
+    ("training", "📝 トレーニングを記録"),
+    ("meal", "🍽 食事を記録"),
+    ("sleep", "😴 睡眠を記録"),
+]
+
+def _mission_kind_for_date(d: date) -> str:
+    return f"daily_mission::{d.isoformat()}"
+
+def load_daily_mission(code_hash: str, d: date):
+    return load_snapshot(code_hash, _mission_kind_for_date(d)) or {}
+
+def save_daily_mission(code_hash: str, d: date, payload: dict):
+    save_snapshot(code_hash, _mission_kind_for_date(d), payload)
+
+def mark_mission_done(code_hash: str, task_key: str, d: date | None = None):
+    d = d or now_jst().date()
+    pl = load_daily_mission(code_hash, d)
+    done = set(pl.get("done", []))
+    done.add(task_key)
+    pl["done"] = sorted(done)
+    save_daily_mission(code_hash, d, pl)
+
+def compute_streak(code_hash: str, max_days: int = 120) -> int:
+    # consecutive days up to today with at least 1 completion
+    today = now_jst().date()
+    streak = 0
+    for i in range(max_days):
+        d = today - timedelta(days=i)
+        pl = load_daily_mission(code_hash, d)
+        if not pl or not pl.get("done"):
+            break
+        streak += 1
+    return streak
+
+def render_daily_missions(code_hash: str):
+    today = now_jst().date()
+    pl = load_daily_mission(code_hash, today)
+    done = set(pl.get("done", []))
+
+    streak = compute_streak(code_hash)
+    col1, col2 = st.columns([2,1])
+    with col1:
+        st.markdown("### ✅ 今日のミッション")
+        completed = sum(1 for k, _ in MISSION_TASKS if k in done)
+        st.progress(completed/len(MISSION_TASKS))
+        for k, label in MISSION_TASKS:
+            checked = (k in done)
+            st.checkbox(label, value=checked, key=f"ms_{today.isoformat()}_{k}", disabled=True)
+    with col2:
+        st.markdown("### 🔥 連続")
+        st.metric("ストリーク", f"{streak} 日")
+        st.caption("1つでも入力できたらOK。続けるほど強くなる。")
 def iso(dt):
     return dt.astimezone(TZ).isoformat()
 
@@ -777,6 +834,8 @@ def auto_fill_latest_all_tabs(code_hash: str):
     st.session_state["_auto_filled_all"] = True
 
 def shared_demographics():
+    # JAMS logo shown once above Basic Info
+    jams_logo_header(width=220)
     st.markdown("### 基本情報")
 
     today = now_jst().date()
@@ -812,25 +871,24 @@ def shared_demographics():
         st.session_state["age_years"] = float(years_between(dob, today))
         st.caption(f"年齢（概算）：{st.session_state['age_years']:.1f}歳")
     st.divider()
-    c4, c5 = st.columns([1,1])
-    with c4:
-        if st.button("基本情報を保存", key="basic_save"):
-            try:
-                save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-                st.success("基本情報を保存しました。")
-            except Exception as e:
-                st.error(f"保存に失敗: {e}")
-    with c5:
-        if st.button("基本情報を読み込み", key="basic_load"):
-            try:
-                ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
-                if ok:
-                    st.success("基本情報を読み込みました。")
-                    st.rerun()
-                else:
-                    st.info("保存済みの基本情報がありません。")
-            except Exception as e:
-                st.error(f"読み込みに失敗: {e}")
+    # 保存/読込（縦並び）
+if st.button("基本情報を読み込み", key="basic_load"):
+    try:
+        ok = load_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+        if ok:
+            st.success("基本情報を読み込みました。")
+            st.rerun()
+        else:
+            st.info("保存済みの基本情報がありません。")
+    except Exception as e:
+        st.error(f"読み込みに失敗: {e}")
+
+if st.button("基本情報を保存", key="basic_save"):
+    try:
+        save_basic_info_snapshot(sha256_hex(st.session_state.get("user","")))
+        st.success("基本情報を保存しました。")
+    except Exception as e:
+        st.error(f"保存に失敗: {e}")
 
 
 # =========================
@@ -981,7 +1039,6 @@ def classify_type(delta: float):
     return "normal", "正常"
 
 def height_page(code_hash: str):
-    jams_logo_header()
     st.subheader("身長予測")
     # load/save buttons adjacent
     if st.button("記入データ読込", key="h_load_top"):
@@ -1174,7 +1231,6 @@ def estimate_endurance_gain(test_kind: str, baseline_value: float, hb_now: float
     return baseline_value * (1.0 + pct), pct
 
 def anemia_page(code_hash: str):
-    jams_logo_header()
     hb_v = ferr_v = fe_v = tibc_v = tsat_val = None
     st.subheader("貧血・リオナ")
     if st.button("記入データ読込", key="a_load_top"):
@@ -1514,7 +1570,6 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
 
     return est
 def meal_page(code_hash: str):
-    jams_logo_header()
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
@@ -1555,6 +1610,7 @@ def meal_page(code_hash: str):
         st.success("保存しました。")
 
     sport = st.session_state.get("sport", SPORTS[0])
+    render_daily_missions(code_hash)
     age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
@@ -1683,6 +1739,7 @@ def meal_page(code_hash: str):
                 st.caption("※日付ごとに最新の食事ログ評価を表示しています（直近約1ヶ月）。")
 
     if st.button("結果保存（食事ログ）", key="meal_save"):
+        mark_mission_done(code_hash, "meal")
         save_record(code_hash, "meal_day",
                     {"goal": goal, "intensity": intensity, "weight": weight, "targets": targets,
                      "breakfast": b, "lunch": l, "dinner": d,
@@ -1714,9 +1771,9 @@ def meal_page(code_hash: str):
 
 
 def exercise_prescription_page(code_hash: str):
-    jams_logo_header()
     st.subheader("🏋️ 運動処方")
     sport = st.session_state.get("sport", SPORTS[0])
+    render_daily_missions(code_hash)
     # ---- Training log (per-user latest + history) ----
     with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
         st.session_state.setdefault("tr_date", now_jst().date())
@@ -1760,6 +1817,7 @@ def exercise_prescription_page(code_hash: str):
             if st.button("保存", key="tr_log_save"):
                 try:
                     save_training_latest(code_hash)
+                    mark_mission_done(code_hash, "training")
                     st.success("保存しました。")
                 except Exception as e:
                     st.error(f"保存に失敗: {e}")
@@ -1961,7 +2019,6 @@ def exercise_prescription_page(code_hash: str):
         # -----------------
         # 怪我
         # -----------------
-    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "tr_menu_text", "title": "🏋️ 運動処方：筋トレメニュー"},
@@ -1969,9 +2026,9 @@ def exercise_prescription_page(code_hash: str):
 
 
 def injury_page(code_hash: str):
-    jams_logo_header()
     st.subheader("🩹 怪我")
     sport = st.session_state.get("sport", SPORTS[0])
+    render_daily_missions(code_hash)
     st.markdown("### 怪我のチェック")
     st.caption("痛む場所を選ぶと質問が増えます。最後にAIがコメントします。")
 
@@ -2056,7 +2113,6 @@ def injury_page(code_hash: str):
         # -----------------
         # 睡眠
         # -----------------
-    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "inj_ai_text", "title": "🩹 怪我：AIコメント"},
@@ -2064,9 +2120,9 @@ def injury_page(code_hash: str):
 
 
 def sleep_page(code_hash: str):
-    jams_logo_header()
     st.subheader("😴 睡眠")
     sport = st.session_state.get("sport", SPORTS[0])
+    render_daily_missions(code_hash)
     st.markdown("### 睡眠")
     wake = st.time_input("起床時刻", value=time(6,0))
     sleep_h = st.number_input("昨日の睡眠時間（時間）", 0.0, 16.0, 8.0, 0.25)
@@ -2103,6 +2159,7 @@ def sleep_page(code_hash: str):
         st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
     if st.button("睡眠ログを保存", key="sl_save"):
+        mark_mission_done(code_hash, "sleep")
         save_record(code_hash, "sleep_log",
                     {"wake": str(wake), "sleep_h": float(sleep_h), "screen": int(screen), "score": int(score)},
                     {"summary": "sleep_log"})
@@ -2114,7 +2171,6 @@ def sleep_page(code_hash: str):
     # -----------------
     # サッカー動画（YouTube検索）
     # -----------------
-    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
@@ -2122,9 +2178,9 @@ def sleep_page(code_hash: str):
 
 
 def soccer_video_page(code_hash: str):
-    jams_logo_header()
     st.subheader("🎥 サッカー動画")
     sport = st.session_state.get("sport", SPORTS[0])
+    render_daily_missions(code_hash)
     if sport != "サッカー":
         st.caption("このタブはサッカー選手向けです。競技がサッカーの場合に使ってください。")
     else:
@@ -2144,7 +2200,6 @@ def soccer_video_page(code_hash: str):
                 for q in queries[:5]:
                     url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
                     st.markdown(f"- [{q}]({url})")
-    jams_logo_footer()
 def main():
     st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     premium_css()
