@@ -1551,98 +1551,128 @@ def eval_ratio(actual: float, target: float) -> str:
 
 def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
     """
-    食事1回分の入力（チェック式 + 写真AI）
-    prefix: "b"/"l"/"d"
+    食事1回分の入力（写真 + ざっくり量選択 + AI推定）
+    - 写真は st.file_uploader（スマホではカメラ/アルバム選択へ）
+    - 量はユーザーが「少/普/多」を選択（写真で伝わりづらい時の補正にも使う）
+    - 「AIで写真から初期値セット」で、選択肢の初期値を自動入力（カロミル風）
     """
     st.markdown(f"#### {title}")
 
-    ai = st.session_state.get(f"{prefix}_ai")
+    # --- 現在値（ユーザー選択） ---
+    def _init_sel(k: str, default):
+        if k not in st.session_state:
+            st.session_state[k] = default
+
+    _init_sel(f"{prefix}_sel_carb", "普")
+    _init_sel(f"{prefix}_sel_protein", "普")
+    _init_sel(f"{prefix}_sel_veg", "普")
+    _init_sel(f"{prefix}_sel_fat", "普")
+    _init_sel(f"{prefix}_sel_fried", False)
+    _init_sel(f"{prefix}_sel_dairy", False)
+    _init_sel(f"{prefix}_sel_fruit", False)
+
+    img_bytes = None
+
+    # --- 写真（任意） ---
     if enable_photo:
-        up = st.file_uploader(f"{title}の写真（任意）", type=["jpg","jpeg","png"], key=f"{prefix}_photo")
+        up = st.file_uploader(
+            f"{title}の写真（カメラ/アルバム）",
+            type=["jpg", "jpeg", "png"],
+            key=f"{prefix}_photo",
+        )
         if up is not None:
             img_bytes = up.getvalue()
-            st.image(up, caption="アップロード画像", use_container_width=True)
 
-            if st.button("AIで推論（少/普/多）", key=f"{prefix}_ai_btn"):
+            # 小サムネ（場所を取りすぎない）
+            st.image(img_bytes, caption=None, width=160)
+
+            # 拡大（ページ内）
+            if st.button("拡大表示", key=f"{prefix}_photo_zoom"):
+                st.image(img_bytes, caption=None, use_container_width=True)
+
+            # AIで初期値セット（写真から、少/普/多を推測）
+            if st.button("AIで写真から初期値セット", key=f"{prefix}_ai_set_btn"):
                 out, err = analyze_meal_photo(img_bytes, title)
-                if err:
-                    st.error("写真解析に失敗: " + err)
-                    ai = None
-                    st.session_state.pop(f"{prefix}_comment", None)
-                    st.session_state.pop(f"{prefix}_score", None)
-                    st.session_state.pop(f"{prefix}_status", None)
-                    st.session_state.pop(f"{prefix}_bullets", None)
+                if err or (out is None):
+                    st.error("写真解析に失敗: " + (err or "unknown"))
                 else:
-                    ai = out
-                    st.session_state[f"{prefix}_ai"] = ai
+                    # 食事判定ガード（非食事の誤爆対策）
+                    conf = float(out.get("confidence", 0.0) or 0.0)
+                    if conf < 0.35:
+                        st.warning("食事写真として判定できませんでした。食事が写るように撮り直すか、下の量選択で入力してください。")
+                    else:
+                        st.session_state[f"{prefix}_sel_carb"] = out.get("carb", "普")
+                        st.session_state[f"{prefix}_sel_protein"] = out.get("protein", "普")
+                        st.session_state[f"{prefix}_sel_veg"] = out.get("veg", "普")
+                        st.session_state[f"{prefix}_sel_fat"] = out.get("fat", "普")
+                        st.session_state[f"{prefix}_sel_fried"] = bool(out.get("fried_or_oily", False))
+                        st.session_state[f"{prefix}_sel_dairy"] = bool(out.get("dairy", False))
+                        st.session_state[f"{prefix}_sel_fruit"] = bool(out.get("fruit", False))
+                        st.success("量の初期値をセットしました（必要なら下で調整してください）")
+                        # 古い評価をクリア
+                        st.session_state.pop(f"{prefix}_comment", None)
 
-                    # estimate + rating
-                    est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
-                                        bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
-                    score, status, bullets = rate_meal(prefix, est, targets)
-                    st.session_state[f"{prefix}_score"] = score
-                    st.session_state[f"{prefix}_status"] = status
-                    st.session_state[f"{prefix}_bullets"] = bullets
+    # --- 量選択（カロミル風：写真 + ざっくり量で推測） ---
+    st.caption("写真だけで伝わりにくい時は、下の「少/普/多」でざっくり補正してください。")
+    c1, c2 = st.columns(2)
+    with c1:
+        carb = st.selectbox("主食（ごはん/パン/麺）", ["少", "普", "多"],
+                            index=["少", "普", "多"].index(st.session_state[f"{prefix}_sel_carb"]),
+                            key=f"{prefix}_sel_carb")
+        protein = st.selectbox("主菜（肉/魚/卵/豆）", ["少", "普", "多"],
+                               index=["少", "普", "多"].index(st.session_state[f"{prefix}_sel_protein"]),
+                               key=f"{prefix}_sel_protein")
+        veg = st.selectbox("野菜", ["少", "普", "多"],
+                           index=["少", "普", "多"].index(st.session_state[f"{prefix}_sel_veg"]),
+                           key=f"{prefix}_sel_veg")
+    with c2:
+        fat = st.selectbox("油もの（揚げ物/マヨ/ドレ）", ["少", "普", "多"],
+                           index=["少", "普", "多"].index(st.session_state[f"{prefix}_sel_fat"]),
+                           key=f"{prefix}_sel_fat")
+        fried = st.toggle("揚げ物・油多め", value=bool(st.session_state[f"{prefix}_sel_fried"]), key=f"{prefix}_sel_fried")
+        dairy = st.toggle("乳製品あり", value=bool(st.session_state[f"{prefix}_sel_dairy"]), key=f"{prefix}_sel_dairy")
+        fruit = st.toggle("果物あり", value=bool(st.session_state[f"{prefix}_sel_fruit"]), key=f"{prefix}_sel_fruit")
 
-                    # AI寸評（失敗時は簡易）
-                    system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
-                    user = f"""{title}の写真推論（主食/主菜/野菜/脂質/乳製品/果物）からPFCとkcalを推定しました。
-推定: kcal={est['kcal']:.0f}, P={est['p']:.0f}g, C={est['c']:.0f}g, F={est['f']:.0f}g
-1日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
-この{title}は朝昼夕の配分を考えると、今の量が適切か、改善点を短い寸評（100〜140字）で書いてください。
-出力は寸評のみ。"""
-                    comment, e2 = ai_text(system, user)
-                    if e2 or not comment:
-                        comment = " / ".join(bullets)
-                    st.session_state[f"{prefix}_comment"] = comment.strip()
+    # 推定（ユーザー選択を反映）
+    est = meal_estimate(carb, protein, veg, bool(fried), bool(dairy), bool(fruit))
 
-                    st.success("推論が完了しました。")
-
-        if ai:
-            st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')} (信頼度 {ai.get('confidence',0):.2f})")
-
-    # 手入力（AIが無い/微調整用）
-    c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
-    p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
-    v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
-    dairy = st.checkbox("乳製品あり", value=False, key=f"{prefix}_dairy")
-    fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
-    fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
-
-    # 推定（AIがあればAI優先）
-    if ai:
-        est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
-                            bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
-    else:
-        est = meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
-
-    # 表示（点数・栄養評価・寸評）
-    score = st.session_state.get(f"{prefix}_score")
-    status = st.session_state.get(f"{prefix}_status")
-    bullets = st.session_state.get(f"{prefix}_bullets") or []
-    comment = st.session_state.get(f"{prefix}_comment")
-
+    # 表示（推定値）
     st.markdown("##### 推定PFC / kcal")
-    m1,m2,m3,m4 = st.columns(4)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("P", f"{est['p']:.0f} g")
     m2.metric("C", f"{est['c']:.0f} g")
     m3.metric("F", f"{est['f']:.0f} g")
     m4.metric("kcal", f"{est['kcal']:.0f}")
 
-    if score is None or status is None:
-        # AI推論前でも評価は出す（手入力ベース）
-        s2, st2, bl2 = rate_meal(prefix, est, targets)
-        score, status, bullets = s2, st2, bl2
+    # 1食コメント（必要な時だけ）
+    if st.button("この食事のAIコメント", key=f"{prefix}_ai_comment_btn"):
+        try:
+            comment = ai_comment_for_meal(title, est, targets)
+            st.session_state[f"{prefix}_comment"] = comment
+        except Exception:
+            st.session_state[f"{prefix}_comment"] = "コメント生成に失敗しました。"
 
-    st.markdown(f"##### {title}スコア：**{int(score)} / 100**（{status}）")
-    if bullets:
-        for b in bullets:
-            st.write("・" + b)
+    comment = st.session_state.get(f"{prefix}_comment")
     if comment:
-        st.markdown("##### 寸評")
+        st.markdown("##### AIコメント")
         st.write(comment)
 
-    return est
+    # meal_pageが保存できる形で返す
+    payload = {
+        "p": float(est["p"]),
+        "c": float(est["c"]),
+        "f": float(est["f"]),
+        "kcal": float(est["kcal"]),
+        "menu": "",
+        "ai_levels": {"carb": carb, "protein": protein, "veg": veg, "fat": fat, "fried": bool(fried), "dairy": bool(dairy), "fruit": bool(fruit)},
+        "sel": {
+            "carb": carb, "protein": protein, "veg": veg, "fat": fat,
+            "fried": bool(fried), "dairy": bool(dairy), "fruit": bool(fruit)
+        },
+    }
+    return payload
+
+
 def meal_page(code_hash: str):
     st.subheader("食事ログ（1日チェック）")
     st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
