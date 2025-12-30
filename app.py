@@ -294,6 +294,82 @@ MEDALS = [
     (3,  "🥉 ブロンズ"),
 ]
 
+
+def calc_daily_targets(weight_kg: float, goal: str) -> dict:
+    """ざっくりの1日目標（kcal/PFC）を算出。
+    goal: 'maintain'/'bulk'/'diet' など（UI表示名でもOK）
+    - diet: -2kg/月 ≒ -500kcal/日を目安（成長期は下げすぎ防止の下限あり）
+    """
+    try:
+        w = float(weight_kg)
+    except Exception:
+        w = 0.0
+    if w <= 0:
+        w = float(st.session_state.get("profile_weight_kg") or 0.0) or 45.0
+
+    # プロフィールから年齢/性別/身長を推定
+    sex = str(st.session_state.get("pf_sex") or st.session_state.get("sex") or "M")
+    h = float(st.session_state.get("pf_height") or st.session_state.get("height_cm") or 165.0)
+    dob = st.session_state.get("pf_dob") or st.session_state.get("dob")
+
+    age = 16.0
+    try:
+        if dob:
+            if isinstance(dob, str):
+                from datetime import datetime
+                # 'YYYY-MM-DD' or similar
+                d = datetime.fromisoformat(dob).date()
+            else:
+                d = dob
+            today = now_jst().date()
+            age = (today - d).days / 365.25
+    except Exception:
+        age = 16.0
+
+    # BMR (Mifflin-St Jeor)
+    # 男性: 10w + 6.25h - 5a + 5 / 女性: ... -161
+    s_const = 5 if sex.upper().startswith("M") else -161
+    bmr = 10*w + 6.25*h - 5*age + s_const
+
+    # 活動係数（アスリート寄りのざっくり）
+    activity = float(st.session_state.get("activity_factor") or 1.6)
+    tdee = bmr * activity
+
+    g = str(goal or "").lower()
+    if "diet" in g or "減量" in g:
+        kcal = tdee - 500.0
+        p_g = 1.8 * w
+        f_g = 0.8 * w
+    elif "bulk" in g or "増量" in g:
+        kcal = tdee + 300.0
+        p_g = 1.8 * w
+        f_g = 1.0 * w
+    else:  # maintain / default
+        kcal = tdee
+        p_g = 1.6 * w
+        f_g = 0.9 * w
+
+    # 成長期の下限（下げすぎ防止）
+    if age < 18:
+        kcal_floor = max(1600.0, 30.0*w)  # 目安
+    else:
+        kcal_floor = max(1200.0, 18.0*w)
+    kcal = max(kcal, kcal_floor)
+
+    # carbs remainder
+    kcal_p = p_g * 4
+    kcal_f = f_g * 9
+    c_g = max(0.0, (kcal - kcal_p - kcal_f) / 4)
+
+    return {
+        "kcal": float(round(kcal)),
+        "p_g": float(round(p_g)),
+        "f_g": float(round(f_g)),
+        "c_g": float(round(c_g)),
+        "age": float(round(age, 1)),
+        "activity_factor": float(activity),
+    }
+
 def calc_medal(streak: int) -> str:
     for days, name in MEDALS:
         if streak >= days:
