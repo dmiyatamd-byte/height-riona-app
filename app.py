@@ -2011,7 +2011,9 @@ def exercise_prescription_page(code_hash: str):
             st.error("AI提案に失敗: " + err)
         else:
             st.session_state["tr_menu_text"] = text
+            text = normalize_training_headings(text)
             ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", text)
+
 
     if st.button("トレーニングログを保存", key="tr_inputs_save"):
         save_record(code_hash, "training_inputs",
