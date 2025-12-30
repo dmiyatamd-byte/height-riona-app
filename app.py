@@ -835,7 +835,7 @@ def auto_fill_latest_all_tabs(code_hash: str):
 
 def shared_demographics():
     # JAMS logo shown once above Basic Info
-    jams_logo_header(width=220)
+    jams_logo_header()      
     st.markdown("### 基本情報")
 
     today = now_jst().date()
