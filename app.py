@@ -1519,19 +1519,45 @@ def kyushoku_template(age_years: float):
     return {"p":30.0,"c":105.0,"f":22.0,"kcal":750.0}
 
 def compute_targets_pfc(weight_kg: float, age_years: float, sport: str, intensity: str, goal: str):
+    """1日のPFC目標をざっくり推定する（スマホ入力向けの簡易ロジック）。
+
+    goal:
+      - 増量 / 維持 / 回復 / ダイエット（-2kg/月 目安）
+    """
     if weight_kg <= 0:
         return None
+
+    # ベース（成長期は少し高め、成人はやや低め）
     base = 45.0 if age_years < 12 else (50.0 if age_years < 15 else 48.0)
-    sport_factor = {"サッカー":1.05,"ラグビー":1.10,"野球":1.00,"テニス":1.00,"水泳":1.08}.get(sport,1.0)
-    intensity_factor = {"低":0.95,"中":1.00,"高":1.10}.get(intensity,1.0)
-    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03}.get(goal,1.0)
-    kcal = weight_kg * base * sport_factor * intensity_factor * goal_factor
-    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0}.get(goal,1.6)
+
+    sport_factor = {"サッカー": 1.05, "ラグビー": 1.10, "野球": 1.00, "テニス": 1.00, "水泳": 1.08}.get(sport, 1.0)
+    intensity_factor = {"低": 0.95, "中": 1.00, "高": 1.10}.get(intensity, 1.0)
+
+    # まず維持カロリーの粗推定
+    maint_kcal = weight_kg * base * sport_factor * intensity_factor
+
+    if goal == "ダイエット":
+        # -2kg/月 ≒ -500kcal/日 の目安（個人差あり）
+        kcal = maint_kcal - 500.0
+
+        # 成長期の下げ過ぎ防止：最低ライン（ざっくり）
+        # 体重×30kcal を下回らないようにする（年齢が若いほど安全側）
+        min_kcal = weight_kg * (32.0 if age_years < 15 else 30.0)
+        kcal = max(kcal, min_kcal)
+
+        # 筋量維持優先でたんぱく質は高め
+        p_perkg = 2.0
+        f_pct = 0.25
+    else:
+        goal_factor = {"増量": 1.08, "維持": 1.00, "回復": 1.03}.get(goal, 1.0)
+        kcal = maint_kcal * goal_factor
+        p_perkg = {"増量": 1.8, "維持": 1.6, "回復": 2.0}.get(goal, 1.6)
+        f_pct = 0.25 if goal in ["増量", "維持"] else 0.28
+
     p_g = p_perkg * weight_kg
-    f_pct = 0.25 if goal in ["増量","維持"] else 0.28
     f_g = (kcal * f_pct) / 9.0
-    c_g = max(0.0, kcal - p_g*4.0 - f_g*9.0) / 4.0
-    return {"kcal":kcal, "p_g":p_g, "c_g":c_g, "f_g":f_g}
+    c_g = max(0.0, kcal - p_g * 4.0 - f_g * 9.0) / 4.0
+    return {"kcal": kcal, "p_g": p_g, "c_g": c_g, "f_g": f_g}
 
 def eval_ratio(actual: float, target: float) -> str:
     if target <= 0:
@@ -1718,7 +1744,7 @@ def meal_page(code_hash: str):
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
     top = st.columns(4)
-    goal = top[0].selectbox("目的", ["増量","維持","回復"], index=1, key="meal_goal")
+    goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
     weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
@@ -1726,6 +1752,8 @@ def meal_page(code_hash: str):
     st.session_state["latest_weight_kg"] = float(weight)
 
     targets = compute_targets_pfc(weight, age_years, sport, intensity, goal)
+    if goal == "ダイエット":
+        st.info("ダイエット（-2kg/月目安）：まずは間食・甘い飲料・揚げ物の頻度を下げ、主食は『普→少』に調整。たんぱく質は毎食しっかり（魚/肉/卵/大豆）。")
     st.markdown("### 目標（P/F/C）")
     t1,t2,t3,t4 = st.columns(4)
     t1.metric("炭水化物", f"{targets['c_g']:.0f} g")
