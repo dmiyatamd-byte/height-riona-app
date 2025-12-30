@@ -2612,9 +2612,20 @@ def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
     except Exception:
         w = 0.0
     if w > 0:
-        if float(st.session_state.get("profile_weight_kg") or 0.0) <= 0.0:
-            st.session_state["profile_weight_kg"] = w
-        st.session_state["latest_weight_kg"] = float(st.session_state.get("profile_weight_kg") or w)
+        # Always treat profile as the source of truth
+        st.session_state["profile_weight_kg"] = float(w)
+        st.session_state["latest_weight_kg"] = float(w)
+
+        # Clear "manual" flags so other tabs can re-seed from updated profile on the next rerun
+        for _k in WEIGHT_KEYS:
+            if _k != "pf_weight":
+                st.session_state.pop(f"{_k}__manual", None)
+
+    try:
+        h = float(prof.get("height_cm") or 0.0)
+    except Exception:
+        h = 0.0
+ession_state.get("profile_weight_kg") or w)
         # seed tab weights (only if not manually edited)
         for k in WEIGHT_KEYS:
             if k not in st.session_state or float(st.session_state.get(k) or 0.0) <= 0.0:
@@ -2711,11 +2722,15 @@ def menu_select_page():
             else:
                 st.write("")
     st.write("")
-    # last full width
-    st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
-    if st.button(last[1], key=f"menu_{last[0]}", use_container_width=True):
-        _route_set(last[0]); st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+    # last row: サッカー動画検索 + 個人情報
+    c1, c2 = st.columns(2, gap="small")
+    with c1:
+        if st.button(last[1], key=f"menu_{last[0]}", use_container_width=True):
+            _route_set(last[0]); st.rerun()
+    with c2:
+        if st.button("👤 個人情報", key="menu_profile_edit", use_container_width=True):
+            _route_set("profile_edit"); st.rerun()
+
     st.markdown('</div>', unsafe_allow_html=True)  # km-grid
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2770,6 +2785,10 @@ def main():
     r = _route_get()
 
     if r == "profile":
+        profile_top_page(code_hash)
+        return
+
+    if r == "profile_edit":
         profile_top_page(code_hash)
         return
 
