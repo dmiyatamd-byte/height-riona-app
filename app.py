@@ -259,50 +259,8 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(2):has(input:ch
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(3):has(input:checked){ background: rgba(16,185,129,0.10) !important; outline-color: rgba(16,185,129,0.35) !important; }
 div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:checked){ background: rgba(245,158,11,0.12) !important; outline-color: rgba(245,158,11,0.40) !important; }
 
-
-/* ===== Mobile: keep buttons readable, but don't force huge height (thumbnails need compact UI) ===== */
-@media (max-width: 640px){
-  div.stButton > button{
-    font-size: 16px !important;
-    font-weight: 800 !important;
-    border-radius: 16px !important;
-  }
-}
 </style>
     """, unsafe_allow_html=True)
-
-
-# =========================
-# Image viewer (thumbnails -> full view)
-# =========================
-
-def open_image_viewer(b64: str, title: str = ""):
-    """Open an in-app image viewer (separate stage) for a stored base64 JPEG."""
-    if not b64:
-        return
-    st.session_state["img_view_b64"] = b64
-    st.session_state["img_view_title"] = title or "写真"
-    st.session_state["img_view_prev_stage"] = st.session_state.get("app_stage", "menu")
-    st.session_state["img_view_prev_page"] = st.session_state.get("current_page", "exercise")
-    st.session_state["app_stage"] = "image_view"
-    st.rerun()
-
-
-def image_viewer_page():
-    """Fullscreen-ish viewer with back button."""
-    title = st.session_state.get("img_view_title", "写真")
-    b64 = st.session_state.get("img_view_b64", "")
-    if st.button("← 戻る", use_container_width=True, key="img_view_back"):
-        st.session_state["app_stage"] = st.session_state.get("img_view_prev_stage", "menu")
-        st.session_state["current_page"] = st.session_state.get("img_view_prev_page", "exercise")
-        st.rerun()
-    st.subheader(title)
-    try:
-        import base64
-        img = base64.b64decode(b64)
-        st.image(img, use_container_width=True)
-    except Exception:
-        st.error("画像を表示できませんでした。")
 
 # =========================
 # Utils
@@ -846,7 +804,7 @@ def load_basic_info_snapshot(code_hash: str) -> bool:
         st.session_state["age_years"] = float(years_between(st.session_state["dob"], today))
     return True
 
-TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes","tr_photos","tr_thumb_w"]
+TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes"]
 
 def save_training_latest(code_hash: str):
     payload = {k: st.session_state.get(k) for k in TRAINING_KEYS}
@@ -1079,12 +1037,27 @@ def openai_client():
         return None, str(e)
 
 def analyze_meal_photo(img_bytes: bytes, meal_type: str):
+    """
+    画像が「食事写真」かどうかをまず判定し、食事でなければ解析を中断する。
+    ※食事でない画像（PC電源、風景、書類など）でもそれっぽい推定を返してしまうのを防ぐため。
+    """
     client, err = openai_client()
     if err:
         return None, err
-    prompt = f"""これは{meal_type}の食事写真です。
-食品群の量感を Aレベル（少/普/多）で推定し、JSONのみで返してください。
-キー: carb, protein, veg, fat, fried_or_oily(true/false), dairy(true/false), fruit(true/false), confidence(0-1)
+
+    prompt = f"""あなたはスポーツ栄養のアシスタントです。
+次の画像が「{meal_type}の食事写真」かどうかを最初に判定してください。
+
+- 食事写真だと判断できる場合: is_food=true として、食品群の量感を Aレベル（少/普/多）で推定してください。
+- 食事写真ではない / 判定不能な場合: is_food=false とし、reason を短く説明してください（例: '機器の写真に見える' など）。
+- 無理に推定しないでください。迷う場合は is_food=false にしてください。
+
+JSONのみで返してください（余計な文章は禁止）。
+キー:
+is_food(true/false), reason,
+carb, protein, veg, fat (各 '少'/'普'/'多' か '不明'),
+fried_or_oily(true/false), dairy(true/false), fruit(true/false),
+confidence(0-1)
 """
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     try:
@@ -1100,21 +1073,38 @@ def analyze_meal_photo(img_bytes: bytes, meal_type: str):
         txt = (resp.output_text or "").strip()
         if not txt:
             return None, "解析結果が空でした。"
+
         data = json.loads(txt)
-        def norm(v): return v if v in ["少","普","多"] else "普"
+
+        is_food = bool(data.get("is_food", False))
+        conf = float(data.get("confidence", 0.0) or 0.0)
+        reason = (data.get("reason") or "").strip()
+
+        # 食事でない可能性が高い場合は中断
+        if (not is_food) or conf < 0.35:
+            msg = "食事写真として判定できませんでした。"
+            if reason:
+                msg += f"（理由: {reason}）"
+            msg += " 食事が写っている写真で、明るく・料理全体が入るように撮影して再度お試しください。"
+            return None, msg
+
+        def norm(v):
+            return v if v in ["少", "普", "多"] else ("不明" if v == "不明" else "普")
+
         out = {
-            "carb": norm(data.get("carb","普")),
-            "protein": norm(data.get("protein","普")),
-            "veg": norm(data.get("veg","普")),
-            "fat": norm(data.get("fat","普")),
+            "carb": norm(data.get("carb", "普")),
+            "protein": norm(data.get("protein", "普")),
+            "veg": norm(data.get("veg", "普")),
+            "fat": norm(data.get("fat", "普")),
             "fried_or_oily": bool(data.get("fried_or_oily", False)),
             "dairy": bool(data.get("dairy", False)),
             "fruit": bool(data.get("fruit", False)),
-            "confidence": float(data.get("confidence", 0.0) or 0.0),
+            "confidence": conf,
         }
         return out, None
     except Exception as e:
         return None, str(e)
+
 
 def ai_text(system: str, user: str):
     client, err = openai_client()
@@ -1262,6 +1252,17 @@ def height_page(code_hash: str):
     if st.button("保存", key="h_save_bottom"):
         keys = ["h_desired","h_date_y1","h_date_y2","h_date_y3","h_y1","h_y2","h_y3","h_w1","h_w2","h_w3","h_alp","h_ba","h_igf1","h_t","h_e2"]
         save_snapshot(code_hash, "height_draft", {k: st.session_state.get(k) for k in keys})
+        st.success("保存しました。")
+
+    if st.button("結果保存（身長）", key="h_result_save"):
+        save_record(code_hash, "height_result", {
+            "desired_cm": desired, "alp": alp, "ba": ba, "igf1": igf1,
+            "testosterone": testosterone, "estradiol": estradiol,
+            "date_y1": d1, "date_y2": d2, "date_y3": d3,
+            "h_y1": h1, "h_y2": h2, "h_y3": h3,
+            "w_y1": w1, "w_y2": w2, "w_y3": w3,
+            "pred_cm": pred, "type": type_jp
+        }, {"summary":"height_result"})
         st.success("保存しました。")
 
 def tsat_from_fe_tibc(fe, tibc):
@@ -1541,16 +1542,11 @@ def compute_targets_pfc(weight_kg: float, age_years: float, sport: str, intensit
     base = 45.0 if age_years < 12 else (50.0 if age_years < 15 else 48.0)
     sport_factor = {"サッカー":1.05,"ラグビー":1.10,"野球":1.00,"テニス":1.00,"水泳":1.08}.get(sport,1.0)
     intensity_factor = {"低":0.95,"中":1.00,"高":1.10}.get(intensity,1.0)
-    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03,"ダイエット":1.00}.get(goal,1.0)
+    goal_factor = {"増量":1.08,"維持":1.00,"回復":1.03}.get(goal,1.0)
     kcal = weight_kg * base * sport_factor * intensity_factor * goal_factor
-    # ダイエット：-2kg/月 ≒ -15,400 kcal/月 → -約500 kcal/日を目安（成長期は下げすぎない）
-    if goal == "ダイエット":
-        kcal = kcal - 520.0
-        floor = weight_kg * (30.0 if age_years < 18 else 25.0)
-        kcal = max(kcal, floor)
-    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0,"ダイエット":1.8}.get(goal,1.6)
+    p_perkg = {"増量":1.8,"維持":1.6,"回復":2.0}.get(goal,1.6)
     p_g = p_perkg * weight_kg
-    f_pct = 0.25 if goal in ["増量","維持","ダイエット"] else 0.28
+    f_pct = 0.25 if goal in ["増量","維持"] else 0.28
     f_g = (kcal * f_pct) / 9.0
     c_g = max(0.0, kcal - p_g*4.0 - f_g*9.0) / 4.0
     return {"kcal":kcal, "p_g":p_g, "c_g":c_g, "f_g":f_g}
@@ -1571,208 +1567,74 @@ def eval_ratio(actual: float, target: float) -> str:
 
 
 
-
-# =========================
-# Meal photo helpers (mobile-friendly)
-# =========================
-def _uploaded_image_to_jpeg_bytes(up) -> tuple:
+def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
     """
-    Return (jpeg_bytes, err). Accepts jpg/png/heic/heif if possible.
-    - For HEIC/HEIF: tries pillow-heif. If not available, returns an actionable error.
-    """
-    if up is None:
-        return None, "no file"
-    try:
-        data = up.getvalue()
-    except Exception:
-        try:
-            data = up.read()
-        except Exception:
-            return None, "画像データを読み取れませんでした。"
-
-    name = (getattr(up, "name", "") or "").lower()
-    mime = (getattr(up, "type", "") or "").lower()
-
-    if ("jpeg" in mime) or name.endswith((".jpg", ".jpeg")):
-        return data, None
-
-    try:
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(data))
-        rgb = img.convert("RGB")
-        out = io.BytesIO()
-        rgb.save(out, format="JPEG", quality=92)
-        return out.getvalue(), None
-    except Exception as e:
-        if name.endswith((".heic", ".heif")) or ("heic" in mime) or ("heif" in mime):
-            try:
-                import io
-                import pillow_heif  # type: ignore
-                from PIL import Image
-                heif_file = pillow_heif.read_heif(data)
-                img = Image.frombytes(
-                    heif_file.mode,
-                    heif_file.size,
-                    heif_file.data,
-                    "raw",
-                    heif_file.mode,
-                    heif_file.stride,
-                ).convert("RGB")
-                out = io.BytesIO()
-                img.save(out, format="JPEG", quality=92)
-                return out.getvalue(), None
-            except Exception:
-                return None, "HEIC形式の画像を取り込めませんでした。iPhoneの場合は「設定 → カメラ → フォーマット → 互換性優先」にすると解決することがあります。"
-        return None, f"画像の読み込みに失敗しました（{e}）"
-
-
-def _resize_jpeg_bytes(jpeg_bytes: bytes, max_w: int = 1024, quality: int = 80) -> bytes:
-    """Resize JPEG bytes to max width to keep storage small (returns JPEG bytes)."""
-    try:
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(jpeg_bytes))
-        img = img.convert("RGB")
-        w, h = img.size
-        if w > max_w:
-            new_h = int(h * (max_w / float(w)))
-            img = img.resize((max_w, max(1, new_h)))
-        out = io.BytesIO()
-        img.save(out, format="JPEG", quality=quality)
-        return out.getvalue()
-    except Exception:
-        return jpeg_bytes
-
-
-
-def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True, default_manual: bool = False):
-    """
-    1食分の入力（スマホ優先）
-    - 基本は「写真→AI解析」
-    - 写真が無理な時だけ「手入力」を開く
+    食事1回分の入力（チェック式 + 写真AI）
+    prefix: "b"/"l"/"d"
     """
     st.markdown(f"#### {title}")
 
-    manual_key = f"{prefix}_manual_open"
-    st.session_state.setdefault(manual_key, bool(default_manual))
-
     ai = st.session_state.get(f"{prefix}_ai")
+    if enable_photo:
+        up = st.file_uploader(f"{title}の写真（任意）", type=["jpg","jpeg","png"], key=f"{prefix}_photo")
+        if up is not None:
+            img_bytes = up.getvalue()
+            st.image(up, caption="アップロード画像", use_container_width=True)
 
-    photos_key = f"{prefix}_photos"
-    st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
-
-    if allow_photo:
-        st.caption("基本：写真 → AI解析（必要な時だけ開いてください）")
-        with st.expander("📸 写真を追加／解析", expanded=False):
-            cap = st.file_uploader("写真を追加（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=False, key=f"{prefix}_uploader")
-
-            chosen = cap
-            if chosen is not None:
-                img_bytes, err = _uploaded_image_to_jpeg_bytes(chosen)
+            if st.button("AIで推論（少/普/多）", key=f"{prefix}_ai_btn"):
+                out, err = analyze_meal_photo(img_bytes, title)
                 if err:
-                    st.error(err)
+                    st.error("写真解析に失敗: " + err)
+                    ai = None
+                    st.session_state.pop(f"{prefix}_comment", None)
+                    st.session_state.pop(f"{prefix}_score", None)
+                    st.session_state.pop(f"{prefix}_status", None)
+                    st.session_state.pop(f"{prefix}_bullets", None)
                 else:
-                    st.image(chosen, caption="取り込み画像（プレビュー）", width=110)
-                    if st.button("AIで食事を解析する（主食/主菜/野菜）", type="primary", key=f"{prefix}_ai_btn"):
-                        out, err2 = analyze_meal_photo(img_bytes, title)
-                        if err2:
-                            st.error("写真解析に失敗: " + err2)
-                            ai = None
-                            st.session_state.pop(f"{prefix}_comment", None)
-                            st.session_state.pop(f"{prefix}_score", None)
-                            st.session_state.pop(f"{prefix}_status", None)
-                            st.session_state.pop(f"{prefix}_bullets", None)
-                        else:
-                            ai = out
-                            st.session_state[f"{prefix}_ai"] = ai
+                    ai = out
+                    st.session_state[f"{prefix}_ai"] = ai
 
-                            # 写真は上書きせず追加（最新3枚まで保持）
-                            try:
-                                import base64
-                                store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1024, quality=80)
-                                b64s = base64.b64encode(store_bytes).decode("ascii")
-                                lst = st.session_state.get(photos_key, [])
-                                lst.append({"ts": iso(now_jst()), "b64": b64s})
-                                st.session_state[photos_key] = lst[-3:]
-                            except Exception:
-                                pass
+                    # estimate + rating
+                    est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                                        bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
+                    score, status, bullets = rate_meal(prefix, est, targets)
+                    st.session_state[f"{prefix}_score"] = score
+                    st.session_state[f"{prefix}_status"] = status
+                    st.session_state[f"{prefix}_bullets"] = bullets
 
-                            est = meal_estimate(
-                                ai.get("carb", "普"),
-                                ai.get("protein", "普"),
-                                ai.get("veg", "普"),
-                                bool(ai.get("fried_or_oily", False)),
-                                bool(ai.get("dairy", False)),
-                                bool(ai.get("fruit", False)),
-                            )
-                            score, status, bullets = rate_meal(prefix, est, targets)
-                            st.session_state[f"{prefix}_score"] = score
-                            st.session_state[f"{prefix}_status"] = status
-                            st.session_state[f"{prefix}_bullets"] = bullets
-
-                            system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
-                            user = f"""{title}の写真推論からPFCとkcalを推定しました。
+                    # AI寸評（失敗時は簡易）
+                    system = "You are a sports nutrition coach specializing in youth athletes. Output Japanese."
+                    user = f"""{title}の写真推論（主食/主菜/野菜/脂質/乳製品/果物）からPFCとkcalを推定しました。
 推定: kcal={est['kcal']:.0f}, P={est['p']:.0f}g, C={est['c']:.0f}g, F={est['f']:.0f}g
 1日の目標: kcal={targets.get('kcal',0):.0f}, P={targets.get('p_g',0):.0f}g, C={targets.get('c_g',0):.0f}g, F={targets.get('f_g',0):.0f}g
 この{title}は朝昼夕の配分を考えると、今の量が適切か、改善点を短い寸評（100〜140字）で書いてください。
 出力は寸評のみ。"""
-                            comment, e3 = ai_text(system, user)
-                            if e3 or not comment:
-                                comment = " / ".join(bullets)
-                            st.session_state[f"{prefix}_comment"] = (comment or "").strip()
-                            st.success("解析しました。")
+                    comment, e2 = ai_text(system, user)
+                    if e2 or not comment:
+                        comment = " / ".join(bullets)
+                    st.session_state[f"{prefix}_comment"] = comment.strip()
+
+                    st.success("推論が完了しました。")
 
         if ai:
-            st.info(f"AI推定：主食={ai.get('carb','?')} / 主菜={ai.get('protein','?')} / 野菜={ai.get('veg','?')} / 脂質={ai.get('fat','?')}（信頼度 {ai.get('confidence',0):.2f}）")
+            st.caption(f"AI推定: 主食={ai.get('carb','?')} 主菜={ai.get('protein','?')} 野菜={ai.get('veg','?')} 脂質={ai.get('fat','?')} (信頼度 {ai.get('confidence',0):.2f})")
 
-        # 追加済み写真（上書きせず、最新3枚まで保持）
-        photos = st.session_state.get(photos_key, [])
-        if photos:
-            st.caption("追加済み写真（最新3枚） ※「画像を開く」または「拡大」で表示")
-            show = photos[-3:]
-            cols = st.columns(len(show))
-            for i, p in enumerate(show):
-                try:
-                    import base64
-                    b64s = p.get("b64", "")
-                    b = base64.b64decode(b64s)
-                    cols[i].image(b, width=88)
-                    # クリックで開けるリンク（新しいタブ）
-                    cols[i].markdown(f'<div style="text-align:center;margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" style="font-size:12px;">画像を開く</a></div>', unsafe_allow_html=True)
-                    if cols[i].button("拡大", key=f"{prefix}_zoom_{i}"):
-                        open_image_viewer(b64s, title=f"{title}（写真）")
-                except Exception:
-                    cols[i].write("（画像）")
-            if st.button("最後の写真を削除", key=f"{prefix}_del_last_photo"):
-                st.session_state[photos_key] = photos[:-1]
-                st.rerun()
+    # 手入力（AIが無い/微調整用）
+    c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
+    p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
+    v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
+    dairy = st.checkbox("乳製品あり", value=False, key=f"{prefix}_dairy")
+    fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
+    fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
 
-        if st.button("写真がとれないとき（手入力）", key=f"{prefix}_open_manual"):
-            st.session_state[manual_key] = True
-            st.rerun()
-
-    if st.session_state.get(manual_key):
-        with st.expander("手入力（主食/主菜/野菜の量）", expanded=True):
-            c_level = st.radio("主食（炭水化物）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_c")
-            p_level = st.radio("主菜（たんぱく質）", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_p")
-            v_level = st.radio("野菜", ["少","普","多"], horizontal=True, index=1, key=f"{prefix}_v")
-            dairy = st.checkbox("乳製品あり", value=False, key=f"{prefix}_dairy")
-            fruit = st.checkbox("果物あり", value=False, key=f"{prefix}_fruit")
-            fried = st.checkbox("揚げ物/高脂質", value=False, key=f"{prefix}_fried")
-
-            if ai:
-                est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
-                                    bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
-            else:
-                est = meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
+    # 推定（AIがあればAI優先）
+    if ai:
+        est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
+                            bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
     else:
-        if ai:
-            est = meal_estimate(ai.get("carb","普"), ai.get("protein","普"), ai.get("veg","普"),
-                                bool(ai.get("fried_or_oily", False)), bool(ai.get("dairy", False)), bool(ai.get("fruit", False)))
-        else:
-            est = meal_estimate("普", "普", "普", False, False, False)
+        est = meal_estimate(c_level, p_level, v_level, fried, dairy, fruit)
 
+    # 表示（点数・栄養評価・寸評）
     score = st.session_state.get(f"{prefix}_score")
     status = st.session_state.get(f"{prefix}_status")
     bullets = st.session_state.get(f"{prefix}_bullets") or []
@@ -1786,6 +1648,7 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
     m4.metric("kcal", f"{est['kcal']:.0f}")
 
     if score is None or status is None:
+        # AI推論前でも評価は出す（手入力ベース）
         s2, st2, bl2 = rate_meal(prefix, est, targets)
         score, status, bullets = s2, st2, bl2
 
@@ -1798,15 +1661,15 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
         st.write(comment)
 
     return est
-
-
 def meal_page(code_hash: str):
-    st.subheader("🍽 食事管理（写真が基本）")
-    st.caption("スマホで『撮る→解析』が最短です。写真が難しいときだけ手入力を開けます。")
+    st.subheader("食事ログ（1日チェック）")
+    st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
 
+    # --- 保存/読込（食事ログ）---
     c1, c2 = st.columns(2)
     if c1.button("読込", key="meal_load_top"):
         payload = load_snapshot(code_hash, "meal_draft")
+        # snapshots に無い場合は records の最新から復元
         if not payload:
             rows = load_records(code_hash, limit=200)
             for r in rows:
@@ -1820,22 +1683,18 @@ def meal_page(code_hash: str):
             st.rerun()
         else:
             st.info("保存データがありません。")
-
     if c2.button("保存", key="meal_save_top"):
         keys = [
             "meal_goal", "meal_intensity", "meal_weight",
-            "b_ai", "l_ai", "d_ai",
-            "b_photos", "l_photos", "d_photos",
-            "b_manual_open", "l_manual_open", "d_manual_open",
-            "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
-            "b_c","b_p","b_v","b_dairy","b_fruit","b_fried",
-            "l_c","l_p","l_v","l_dairy","l_fruit","l_fried",
-            "d_c","d_p","d_v","d_dairy","d_fruit","d_fried",
-            "l_ai_comment_text",
-            "lunch_mode",
+            "school_lunch", "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
+            "b_c", "b_p", "b_v", "b_dairy", "b_fruit", "b_fried", "b_ai",
+            "l_c", "l_p", "l_v", "l_dairy", "l_fruit", "l_fried", "l_ai",
+            "d_c", "d_p", "d_v", "d_dairy", "d_fruit", "d_fried", "d_ai",
         ]
         payload = {k: st.session_state.get(k) for k in keys}
+        # まずは「最新状態」として snapshots に保存
         save_snapshot(code_hash, "meal_draft", payload)
+        # さらに日々のログとして records にも積む（翌日でも復元できる）
         try:
             save_record(code_hash, "meal_log", payload=payload, result={"date": str(now_jst().date())})
         except Exception:
@@ -1847,12 +1706,11 @@ def meal_page(code_hash: str):
     weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
 
     top = st.columns(4)
-    goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
-    if goal == "ダイエット":
-        st.info("ダイエットは『-2kg/月』を目標（目安：-約500kcal/日）。筋量を落とさないため、たんぱく質は高め（約1.8g/kg/日）、主食は運動量に合わせて調整します。毎週の体重・コンディションで微調整してください。成長期は無理な制限は避け、月-2kgでもきつい場合はペースを落とします。")
+    goal = top[0].selectbox("目的", ["増量","維持","回復"], index=1, key="meal_goal")
     intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
     weight = top[2].number_input("体重（kg）", 20.0, 150.0, value=weight0 if weight0>0 else 45.0, step=0.1, key="meal_weight")
     top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
+
     st.session_state["latest_weight_kg"] = float(weight)
 
     targets = compute_targets_pfc(weight, age_years, sport, intensity, goal)
@@ -1863,29 +1721,32 @@ def meal_page(code_hash: str):
     t3.metric("脂質", f"{targets['f_g']:.0f} g")
     t4.metric("総カロリー", f"{targets['kcal']:.0f} kcal")
 
-    st.divider()
 
     with st.expander("朝食", expanded=True):
-        b = meal_block("b", "朝食", targets, allow_photo=True, default_manual=False)
+        b = meal_block("b", "朝食", True, targets)
 
-    with st.expander("昼食", expanded=True):
-        st.markdown("#### 昼食の入力方法")
-        lunch_mode = st.radio("", ["写真", "給食"], horizontal=True, key="lunch_mode")
-
-        if lunch_mode == "給食":
-            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。")
+    # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
+    with st.expander("昼食", expanded=False):
+        st.markdown("#### 昼食")
+        is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
+        if is_school:
+            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。メニューが分かれば入力してください。")
             menu = st.text_area("メニュー（分かる範囲で）", key="l_menu", placeholder="例：ごはん、鶏の照り焼き、みそ汁、牛乳…")
             lk = st.number_input("推定カロリー（kcal）", 0.0, 2000.0, value=650.0, step=10.0, key="l_kcal_simple")
             lp = st.number_input("たんぱく質（g）", 0.0, 200.0, value=25.0, step=1.0, key="l_p_simple")
             lc = st.number_input("炭水化物（g）", 0.0, 400.0, value=90.0, step=1.0, key="l_c_simple")
             lf = st.number_input("脂質（g）", 0.0, 200.0, value=18.0, step=1.0, key="l_f_simple")
             l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
-            st.session_state["l_manual_open"] = False
         else:
-            l = meal_block("l", "昼食", targets, allow_photo=True, default_manual=False)
+            st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
+            l = meal_block("l", "昼食", True, targets)
             l["mode"] = "normal"
 
-        if st.button("昼食のコメントをAIで作る（しっかり）", key="l_ai_comment_btn"):
+        # 昼食のAIコメント（しっかり）
+        if st.button("昼食のAIコメント（しっかり）", key="l_ai_comment_btn"):
+            # 目標との差分を昼の一言に落とす
+            targets_local = targets  # meal_page内のtargetsを参照
+            # ここでは昼食単体と、昼までの累計でコメントを作る
             p_l = float(l.get("p", 0.0) or 0.0)
             c_l = float(l.get("c", 0.0) or 0.0)
             f_l = float(l.get("f", 0.0) or 0.0)
@@ -1895,13 +1756,12 @@ def meal_page(code_hash: str):
             user = f"""目的: {goal}
 運動強度: {intensity}
 体重: {weight} kg
-1日の目標: kcal={targets['kcal']:.0f}, C={targets['c_g']:.0f}g, P={targets['p_g']:.0f}g, F={targets['f_g']:.0f}g
+1日の目標: kcal={targets_local['kcal']:.0f}, C={targets_local['c_g']:.0f}g, P={targets_local['p_g']:.0f}g, F={targets_local['f_g']:.0f}g
 
 昼食（推定）:
 - kcal: {k_l:.0f}
 - C/P/F: {c_l:.0f}g / {p_l:.0f}g / {f_l:.0f}g
 - メニュー: {menu_txt if menu_txt else "不明（写真/入力ベース）"}
-
 お願い:
 - 昼食の評価（良い点/改善点）を短く
 - 今日は“夕食でどう帳尻を合わせるか”を具体量で提案（例：ごはん何g、肉/魚何g、牛乳/ヨーグルト量）
@@ -1913,12 +1773,12 @@ def meal_page(code_hash: str):
                 st.error("AIコメントに失敗: " + err)
             else:
                 st.session_state["l_ai_comment_text"] = text
-
         if st.session_state.get("l_ai_comment_text"):
-            ai_highlight_box("🍱 昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
+            ai_highlight_box("昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
 
     with st.expander("夕食", expanded=True):
-        d = meal_block("d", "夕食", targets, allow_photo=True, default_manual=False)
+
+        d = meal_block("d", "夕食", True, targets)
 
     tot_p = b["p"] + l["p"] + d["p"]
     tot_c = b["c"] + l["c"] + d["c"]
@@ -1936,18 +1796,65 @@ def meal_page(code_hash: str):
     e3.metric("脂質", f"{tot_f:.0f} g", r_f)
     e4.metric("総カロリー", f"{tot_k:.0f} kcal", r_k)
 
+    
+    with st.expander("📅 食事ログ（カレンダー）", expanded=False):
+        rows = load_records(code_hash, limit=500)
+        meals = [r for r in rows if r.get("kind") == "meal_day"]
+        if not meals:
+            st.caption("まだ保存がありません。")
+        else:
+            # 日付ごとに集計（最新30日）
+            data = []
+            for r in meals:
+                try:
+                    dt = r.get("created_at","")[:10]  # YYYY-MM-DD
+                    pl = r.get("payload") or {}
+                    rt = (pl.get("ratings") or {})
+                    data.append({
+                        "date": dt,
+                        "p": rt.get("p",""),
+                        "c": rt.get("c",""),
+                        "f": rt.get("f",""),
+                        "kcal": rt.get("kcal","")
+                    })
+                except Exception:
+                    pass
+            dfm = pd.DataFrame(data).dropna()
+            if dfm.empty:
+                st.caption("ログが読み取れませんでした。")
+            else:
+                dfm = dfm.sort_values("date")
+                dfm = dfm.drop_duplicates(subset=["date"], keep="last")
+                dfm_tail = dfm.tail(31).reset_index(drop=True)
+                st.dataframe(dfm_tail, use_container_width=True, hide_index=True)
+                st.caption("※日付ごとに最新の食事ログ評価を表示しています（直近約1ヶ月）。")
+
     if st.button("結果保存（食事ログ）", key="meal_save"):
-        save_record(
-            code_hash,
-            "meal_day",
-            {"goal": goal, "intensity": intensity, "weight": weight, "targets": targets,
-             "breakfast": b, "lunch": l, "dinner": d,
-             "total": {"p": tot_p, "c": tot_c, "f": tot_f, "kcal": tot_k},
-             "ratings": {"p": r_p, "c": r_c, "f": r_f, "kcal": r_k}},
-            {"summary":"meal_day"}
-        )
+        save_record(code_hash, "meal_day",
+                    {"goal": goal, "intensity": intensity, "weight": weight, "targets": targets,
+                     "breakfast": b, "lunch": l, "dinner": d,
+                     "total": {"p": tot_p, "c": tot_c, "f": tot_f, "kcal": tot_k},
+                     "ratings": {"p": r_p, "c": r_c, "f": r_f, "kcal": r_k}},
+                    {"summary":"meal_day"})
         st.success("保存しました。")
 
+
+    st.divider()
+    if st.button("記入データ読込", key="meal_load_bottom"):
+        payload = load_snapshot(code_hash, "meal_draft")
+        if payload:
+            for k,v in payload.items():
+                st.session_state[k] = v
+            st.success("読み込みました。")
+            st.rerun()
+        else:
+            st.info("保存データがありません。")
+    if st.button("保存", key="meal_save_bottom"):
+        keys = ["meal_goal","meal_intensity","meal_weight","b_c","b_p","b_v","b_dairy","b_fruit","b_fried","l_kyu","l_c","l_p","l_v","l_dairy","l_fruit","l_fried","d_c","d_p","d_v","d_dairy","d_fruit","d_fried"]
+        save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
+        st.success("保存しました。")
+
+    # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "l_ai_comment_text", "title": "🍱 食事管理：昼食のAIコメント"},
     ])
@@ -1965,13 +1872,11 @@ def exercise_prescription_page(code_hash: str):
         st.session_state.setdefault("tr_rpe", 5)
         st.session_state.setdefault("tr_focus", "")
         st.session_state.setdefault("tr_notes", "")
-        st.session_state.setdefault("tr_photos", [])
-        st.session_state.setdefault("tr_thumb_w", 140)
 
         st.date_input("日付", value=st.session_state.get("tr_date"), key="tr_date")
         st.selectbox(
             "種類",
-            ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","低酸素トレーニング","リカバリー","その他"],
+            ["チーム練習","試合","筋力（上半身）","筋力（下半身）","スプリント","持久走","リカバリー","その他"],
             index=0,
             key="tr_type"
         )
@@ -1983,7 +1888,7 @@ def exercise_prescription_page(code_hash: str):
         )
         st.slider("主観的きつさ（RPE 1-10）", 1, 10, int(st.session_state.get("tr_rpe", 5) or 5), key="tr_rpe")
                 # 主目的（プリセット＋自由入力）
-        goal_opts = ["スプリント", "当たり負け改善", "持久力", "リカバリー", "技術練習", "その他（自由入力）"]
+        goal_opts = ["スプリント", "当たり負け改善", "持久力", "低酸素トレーニング", "リカバリー", "技術練習", "その他（自由入力）"]
         cur_goal = (st.session_state.get("tr_goal_text") or "").strip()
         default_idx = 0
         if cur_goal in goal_opts:
@@ -1996,65 +1901,6 @@ def exercise_prescription_page(code_hash: str):
         else:
             st.session_state["tr_goal_text"] = goal_sel
         st.text_area("内容メモ（セット数・距離・本数など）", value=st.session_state.get("tr_notes",""), height=120, key="tr_notes")
-
-                # --- 内容メモの写真（練習メニューのボード等） ---
-        st.markdown("##### 📸 内容メモの写真（練習メニューのボードなど）")
-        photos_key = "tr_photos"
-        st.session_state.setdefault(photos_key, [])  # list of {"ts": str, "b64": str}
-
-        # 入力UIは場所を取るので折りたたみ（食事管理と同じ方式）
-        with st.expander("📸 写真を追加／保存", expanded=False):
-            up = st.file_uploader(
-                "写真を追加（カメラ/アルバム）",
-                type=["jpg", "jpeg", "png", "heic", "heif"],
-                accept_multiple_files=False,
-                key="tr_memo_uploader",
-            )
-
-            if st.button("写真を追加", key="tr_add_photo"):
-                if up is None:
-                    st.warning("写真がありません。")
-                else:
-                    img_bytes, err = _uploaded_image_to_jpeg_bytes(up)
-                    if err:
-                        st.error(err)
-                    else:
-                        import base64
-                        from datetime import datetime
-
-                        store_bytes = _resize_jpeg_bytes(img_bytes, max_w=1280, quality=80)
-                        b64s = base64.b64encode(store_bytes).decode("ascii")
-                        photos = st.session_state.get(photos_key, [])
-                        photos = (photos + [{"ts": datetime.now().isoformat(), "b64": b64s}])[-6:]  # 最新6枚
-                        st.session_state[photos_key] = photos
-                        st.success("写真を追加しました。")
-                        st.rerun()
-
-        # サムネイル表示（小さく、最大3枚）＋「画像を開く」＋「拡大」
-        photos = st.session_state.get(photos_key, [])
-        if photos:
-            st.caption("追加済み写真（最新3枚）")
-            show = photos[-3:]
-            cols = st.columns(len(show))
-            import base64 as _b64
-            for i, p in enumerate(show):
-                b64s = p.get("b64", "")
-                try:
-                    b = _b64.b64decode(b64s)
-                    cols[i].image(b, width=88)
-                except Exception:
-                    cols[i].write("（画像）")
-
-                cols[i].markdown(
-                    f'<div style="text-align:center; margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">画像を開く</a></div>',
-                    unsafe_allow_html=True,
-                )
-                if cols[i].button("拡大", key=f"tr_zoom_{i}"):
-                    open_image_viewer(b64s, title="運動処方：内容メモの写真")
-
-            if st.button("最後の写真を削除", key="tr_del_last_photo"):
-                st.session_state[photos_key] = photos[:-1]
-                st.rerun()
 
         cA, cB, cD, cC = st.columns([1,1,1,2])
         with cA:
@@ -2516,96 +2362,8 @@ def soccer_video_page(code_hash: str):
                     url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(q)
                     st.markdown(f"- [{q}]({url})")
     jams_logo_footer()
-
-# =========================
-# App flow (mobile first)
-# =========================
-PAGES = [
-    ("exercise", "1️⃣ 運動処方", "🏋️"),
-    ("meal", "2️⃣ 食事管理", "🍽"),
-    ("height", "3️⃣ 身長予測", "📏"),
-    ("anemia", "4️⃣ スポーツ貧血の評価", "🩸"),
-    ("injury", "5️⃣ 怪我の相談", "🩹"),
-    ("sleep", "6️⃣ 睡眠の質", "😴"),
-    ("soccer", "7️⃣ サッカー動画検索", "🎥"),
-]
-
-def _basic_info_ready() -> bool:
-    return bool(st.session_state.get("dob")) and bool(st.session_state.get("sex_code")) and bool(st.session_state.get("sport")) and bool(st.session_state.get("name_kana"))
-
-def basic_info_entry_page(code_hash: str):
-    st.markdown("### 基礎情報の登録")
-    st.caption("最初に1回登録したら、次から自動で復元されます。")
-    shared_demographics()
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("登録して次へ", type="primary", use_container_width=True, key="go_menu"):
-            if not _basic_info_ready():
-                st.error("名前・性別・生年月日・競技を入力してください。")
-            else:
-                save_basic_info_snapshot(code_hash)
-                st.session_state["app_stage"] = "menu"
-                st.rerun()
-    with c2:
-        if st.button("ログアウト", use_container_width=True, key="logout_btn"):
-            st.session_state.pop("user", None)
-            st.session_state["app_stage"] = "basic"
-            st.rerun()
-
-def menu_page():
-    st.markdown("### 機能を選択")
-    st.caption("タップすると各機能に移動します。戻るとここに戻ります。")
-
-    labels = {k: f"{icon} {title}" for (k, title, icon) in PAGES}
-
-    # 2列（最後だけ1列）
-    pairs = [PAGES[i:i+2] for i in range(0, 6, 2)]
-    for pair in pairs:
-        c1, c2 = st.columns(2)
-        (k1, t1, ic1) = pair[0]
-        (k2, t2, ic2) = pair[1]
-        if c1.button(f"{ic1} {t1}", use_container_width=True, key=f"menu_{k1}"):
-            st.session_state["current_page"] = k1
-            st.session_state["app_stage"] = "page"
-            st.rerun()
-        if c2.button(f"{ic2} {t2}", use_container_width=True, key=f"menu_{k2}"):
-            st.session_state["current_page"] = k2
-            st.session_state["app_stage"] = "page"
-            st.rerun()
-
-    # Soccer: full width
-    k, t, ic = PAGES[-1]
-    if st.button(f"{ic} {t}", use_container_width=True, key=f"menu_{k}"):
-        st.session_state["current_page"] = k
-        st.session_state["app_stage"] = "page"
-        st.rerun()
-
-def page_wrapper(code_hash: str, page_key: str):
-    if st.button("← 戻る（機能選択へ）", use_container_width=True, key=f"back_to_menu_{page_key}"):
-        st.session_state["app_stage"] = "menu"
-        st.rerun()
-
-    # --- render page ---
-    if page_key == "exercise":
-        exercise_prescription_page(code_hash)
-    elif page_key == "meal":
-        meal_page(code_hash)
-    elif page_key == "height":
-        height_page(code_hash)
-    elif page_key == "anemia":
-        anemia_page(code_hash)
-    elif page_key == "injury":
-        injury_page(code_hash)
-    elif page_key == "sleep":
-        sleep_page(code_hash)
-    elif page_key == "soccer":
-        soccer_video_page(code_hash)
-    else:
-        exercise_prescription_page(code_hash)
-
 def main():
-    st.set_page_config(page_title="JAMS（スマホ最適）", layout="wide")
+    st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     premium_css()
     apply_css()
     init_users_db()
@@ -2619,36 +2377,42 @@ def main():
 
     code_hash = sha256_hex(user)
 
-    # AIコメント復元
+    # AIコメント（メニュー/睡眠/怪我/食事など）を前回分から復元
     restore_ai_cache_to_session(code_hash)
 
-    # 基本情報復元
+    # per-user saved data
     try:
         load_basic_info_snapshot(code_hash)
     except Exception:
         pass
-
-    # stage init
-    st.session_state.setdefault("app_stage", "menu" if _basic_info_ready() else "basic")
-    st.session_state.setdefault("current_page", "exercise")
-
-    # 各タブの入力欄 自動復元
     try:
         load_training_latest(code_hash)
     except Exception:
         pass
+
+    shared_demographics()
     auto_fill_latest_all_tabs(code_hash)
     auto_fill_from_latest_records(code_hash)
 
-    stage = st.session_state.get("app_stage", "basic")
-    if stage == "basic":
-        basic_info_entry_page(code_hash)
-    elif stage == "image_view":
-        image_viewer_page()
-    elif stage == "menu":
-        menu_page()
+    st.markdown("### 画面選択")
+    with st.container():
+        nav = st.radio("", ["🏋️ 運動処方","🍽 食事管理","📏 身長予測","🩸 スポーツ貧血","🩹 怪我","😴 睡眠","🎥 サッカー動画"], horizontal=True, key="nav_main")
+    if nav == "🏋️ 運動処方":
+        exercise_prescription_page(code_hash)
+    elif nav == "🍽 食事管理":
+        meal_page(code_hash)
+    elif nav == "📏 身長予測":
+        height_page(code_hash)
+    elif nav == "🩸 スポーツ貧血":
+        anemia_page(code_hash)
+    elif nav == "🩹 怪我":
+        injury_page(code_hash)
+    elif nav == "😴 睡眠":
+        sleep_page(code_hash)
+    elif nav == "🎥 サッカー動画":
+        soccer_video_page(code_hash)
     else:
-        page_wrapper(code_hash, st.session_state.get("current_page", "exercise"))
+        exercise_prescription_page(code_hash)
 
     # AIコメントをDBに保存（翌日・別端末でも復元できる）
     try:
@@ -2658,4 +2422,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
