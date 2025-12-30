@@ -439,22 +439,56 @@ def ai_highlight_box(title: str, text: str):
 
 
 def normalize_training_headings(text: str) -> str:
-    """Normalize headings in AI training menu so '上半身/下半身/体幹/4週間' show with same font size.
-    ai_highlight_box uses HTML, so we inject small HTML heading blocks."""
+    """
+    筋トレメニュー内の見出しをすべて同一フォント・同一サイズに統一する
+    - Markdown見出し（### 上半身トレーニング 等）も除去
+    - 表記ゆれ（上半身 / 上半身トレーニング 等）も吸収
+    """
     if not text:
         return text
-    heads = ["上半身", "下半身", "体幹", "4週間の進め方", "４週間の進め方", "４週間", "4週間"]
-    lines = (text or "").splitlines()
-    out = []
-    for ln in lines:
-        s = ln.strip()
-        s_clean = s.lstrip("-•・ ").strip("【】[]()（）:：")
-        if s_clean in heads:
-            out.append(f'<div style="font-weight:800;font-size:17px;margin:10px 0 6px 0;">{s_clean}</div>')
-        else:
-            out.append(ln)
-    return "\n".join(out)
 
+    head_keywords = [
+        "上半身",
+        "下半身",
+        "体幹",
+        "4週間の進め方",
+        "４週間の進め方",
+        "4週間",
+        "４週間",
+    ]
+
+    lines = text.splitlines()
+    out = []
+
+    for line in lines:
+        raw = line.strip()
+        raw = raw.lstrip("#").strip()
+        raw_clean = raw.strip("【】[]()（）:：・- ")
+
+        matched = None
+        for kw in head_keywords:
+            if kw in raw_clean:
+                matched = raw_clean
+                break
+
+        if matched:
+            out.append(
+                (
+                    "<div style=\""
+                    "font-weight:800;"
+                    "font-size:18px;"
+                    "margin:14px 0 8px 0;"
+                    "padding:6px 0;"
+                    "border-bottom:2px solid rgba(0,0,0,0.08);"
+                    "\">"
+                    f"{matched}"
+                    "</div>"
+                )
+            )
+        else:
+            out.append(line)
+
+    return "\n".join(out)
 
 def saved_ai_footer(items):
     """Footer area where saved comments are shown + copy buttons."""
@@ -2029,9 +2063,9 @@ def exercise_prescription_page(code_hash: str):
         if err:
             st.error("AI提案に失敗: " + err)
         else:
+            st.session_state["tr_menu_text"] = normalize_training_headings(text)
             text = normalize_training_headings(text)
-            st.session_state["tr_menu_text"] = text
-            ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", text)
+            ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", normalize_training_headings(text))
 
 
     if st.button("トレーニングログを保存", key="tr_inputs_save"):
@@ -2266,7 +2300,12 @@ def sleep_page(code_hash: str):
     # -----------------
     # サッカー動画（YouTube検索）
     # -----------------
+    jams_logo_footer()
     # --- 保存済みAIコメント（コピーはここから） ---
+    saved_ai_footer([
+        {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
+    ])
+
 
 def soccer_video_page(code_hash: str):
     st.subheader("🎥 サッカー動画")
