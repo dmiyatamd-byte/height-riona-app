@@ -1105,6 +1105,47 @@ def ai_text(system: str, user: str):
 # =========================
 # Pages
 # =========================
+
+def ai_comment_for_meal(meal_title: str, est: dict, targets: dict):
+    """短い食事コメントを生成。est/targetsは {p,c,f,kcal} を想定。"""
+    def _num(v, d=0.0):
+        try:
+            return float(v)
+        except Exception:
+            return float(d)
+
+    ek = _num(est.get("kcal"))
+    ep = _num(est.get("p"))
+    ec = _num(est.get("c"))
+    ef = _num(est.get("f"))
+
+    tk = _num(targets.get("kcal"))
+    tp = _num(targets.get("p"))
+    tc = _num(targets.get("c"))
+    tf = _num(targets.get("f"))
+
+    system = (
+        "You are a nutrition coach for youth athletes in Japan. "
+        "Be concise and practical. Output Japanese. "
+        "Do not mention 'AI' or uncertainties. "
+        "Avoid medical diagnosis. "
+        "Use 3-6 bullet points. "
+    )
+    user = f"""食事: {meal_title}
+推定: kcal={ek:.0f}, P={ep:.1f}g, C={ec:.1f}g, F={ef:.1f}g
+目標(1日): kcal={tk:.0f}, P={tp:.1f}g, C={tc:.1f}g, F={tf:.1f}g
+
+この食事について、次の観点でコメントして:
+- 良い点
+- 足りない/多い場合の調整案（食材例）
+- 次の食事で意識する一言
+"""
+    text, err = ai_text(system, user)
+    if err:
+        raise RuntimeError(err)
+    return (text or "").strip()
+
+
 def classify_type(delta: float):
     if delta >= TYPE_EARLY_DELTA:
         return "precocious", "早熟型"
@@ -1675,8 +1716,8 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
         try:
             comment = ai_comment_for_meal(title, est, targets)
             st.session_state[f"{prefix}_comment"] = comment
-        except Exception:
-            st.session_state[f"{prefix}_comment"] = "コメント生成に失敗しました。"
+        except Exception as e:
+            st.session_state[f"{prefix}_comment"] = "コメント生成に失敗しました: " + str(e)
 
     comment = st.session_state.get(f"{prefix}_comment")
     if comment:
