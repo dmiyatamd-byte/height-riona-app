@@ -1132,61 +1132,56 @@ def openai_client():
     except Exception as e:
         return None, str(e)
 
+
 def analyze_meal_photo(img_bytes: bytes, meal_type: str):
+    """
+    食事写真を解析して、量感（少/普/多）と特徴、食事内容の要約を返す。
+    返却: dict {is_food, carb, protein, veg, fat, fried_or_oily, dairy, fruit, items, note, confidence}
+    """
     client, err = openai_client()
     if err:
         return None, err
-    prompt = f"""これは{meal_type}の食事写真です。
-食品群の量感を Aレベル（少/普/多）で推定し、JSONのみで返してください。
-キー: carb, protein, veg, fat, fried_or_oily(true/false), dairy(true/false), fruit(true/false), confidence(0-1)
+
+    prompt = f"""画像が「食事の写真」かどうかをまず判定してください。
+食事でない場合は is_food=false とし、他の推定は空 or 低信頼で返してください。
+
+食事の場合:
+- 主食/主菜/野菜の量感を Aレベル（少/普/多）で推定
+- 揚げ物・油っぽさ、乳製品、果物の有無を推定
+- 料理名や食材を items に箇条書きで（推測でOK）
+- note に短い要約を1文で
+- confidence は0-1
+
+JSONのみで返してください。キー:
+is_food(boolean), carb, protein, veg, fat("少/普/多"),
+fried_or_oily(boolean), dairy(boolean), fruit(boolean),
+items(array of string), note(string), confidence(number)
 """
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
     try:
         resp = client.responses.create(
             model="gpt-4.1-mini",
-            input=[{"role":"user","content":[
-                {"type":"input_text","text":prompt},
-                {"type":"input_image","image_url":"data:image/jpeg;base64,"+img_b64},
-            ]}],
-            text={"format":{"type":"json_object"}},
-            temperature=0
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{img_b64}"},
+                ],
+            }],
+            temperature=0.2,
+            max_output_tokens=600,
         )
-        txt = (resp.output_text or "").strip()
-        if not txt:
-            return None, "解析結果が空でした。"
-        data = json.loads(txt)
-        def norm(v): return v if v in ["少","普","多"] else "普"
-        out = {
-            "carb": norm(data.get("carb","普")),
-            "protein": norm(data.get("protein","普")),
-            "veg": norm(data.get("veg","普")),
-            "fat": norm(data.get("fat","普")),
-            "fried_or_oily": bool(data.get("fried_or_oily", False)),
-            "dairy": bool(data.get("dairy", False)),
-            "fruit": bool(data.get("fruit", False)),
-            "confidence": float(data.get("confidence", 0.0) or 0.0),
-        }
-        return out, None
+        text = (resp.output_text or "").strip()
+        # JSON抽出（余計な文字が混じる場合に備える）
+        m = re.search(r'\{.*\}', text, flags=re.S)
+        j = m.group(0) if m else text
+        data = json.loads(j)
+        # normalize
+        data.setdefault("is_food", True)
+        data.setdefault("confidence", 0.0)
+        return data, None
     except Exception as e:
         return None, str(e)
-
-def ai_text(system: str, user: str):
-    client, err = openai_client()
-    if err:
-        return None, err
-    try:
-        resp = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[{"role":"system","content":system},{"role":"user","content":user}],
-            temperature=0.2
-        )
-        return (resp.output_text or "").strip(), None
-    except Exception as e:
-        return None, str(e)
-
-# =========================
-# Pages
-# =========================
 
 def ai_comment_for_meal(meal_title: str, est: dict, targets: dict):
     """短い食事コメントを生成。est/targetsは {p,c,f,kcal} を想定。"""
@@ -1825,208 +1820,157 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
     return payload
 
 
+
 def meal_page(code_hash: str):
-    st.subheader("食事ログ（1日チェック）")
-    st.caption("朝・昼・夕で1日のPFCを推定します。昼は「給食（簡易）」または「通常（朝夕と同等）」を選べます。")
+    st.subheader("🍽️ 食事管理（写真→AI解析）")
+    st.caption("朝・昼・夕の写真をアップロードして、AIが内容を推測してフィードバックします。間違ってもOK（目安）。昼が給食の場合はチェックのみ。")
 
-    # --- 保存/読込（食事ログ）---
-    c1, c2 = st.columns(2)
-    if c1.button("読込", key="meal_load_top"):
-        payload = load_snapshot(code_hash, "meal_draft")
-        # snapshots に無い場合は records の最新から復元
-        if not payload:
-            rows = load_records(code_hash, limit=200)
-            for r in rows:
-                if r.get("kind") == "meal_log":
-                    payload = r.get("payload") or {}
-                    break
-        if payload:
-            for k, v in payload.items():
-                st.session_state[k] = v
-            st.success("読み込みました。")
-            st.rerun()
-        else:
-            st.info("保存データがありません。")
-    if c2.button("保存", key="meal_save_top"):
-        keys = [
-            "meal_goal", "meal_intensity", "meal_weight",
-            "school_lunch", "l_menu", "l_kcal_simple", "l_p_simple", "l_c_simple", "l_f_simple",
-            "b_c", "b_p", "b_v", "b_dairy", "b_fruit", "b_fried", "b_ai",
-            "l_c", "l_p", "l_v", "l_dairy", "l_fruit", "l_fried", "l_ai",
-            "d_c", "d_p", "d_v", "d_dairy", "d_fruit", "d_fried", "d_ai",
-        ]
-        payload = {k: st.session_state.get(k) for k in keys}
-        # まずは「最新状態」として snapshots に保存
-        save_snapshot(code_hash, "meal_draft", payload)
-        # さらに日々のログとして records にも積む（翌日でも復元できる）
-        try:
-            save_record(code_hash, "meal_log", payload=payload, result={"date": str(now_jst().date())})
-        except Exception:
-            pass
-        st.success("保存しました。")
+    # 体重はプロフィールから初期値（ウィジェット作成前に同期済み）
+    w = float(st.session_state.get("meal_weight") or st.session_state.get("profile_weight_kg") or 45.0)
 
-    sport = st.session_state.get("sport", SPORTS[0])
-    age_years = float(st.session_state.get("age_years", 15.0) or 15.0)
-    weight0 = float(st.session_state.get("latest_weight_kg", 0.0) or 0.0)
+    # 目的（ダイエットあり）
+    goal = st.selectbox("目的", ["増量", "維持", "回復", "ダイエット"], key="meal_goal", index=1)
+    targets = calc_daily_targets(w, goal)  # 既存関数（-2kg/月は内部で反映）
+    st.caption(f"目標（1日）: kcal {targets['kcal']:.0f} / P {targets['p']:.0f}g / C {targets['c']:.0f}g / F {targets['f']:.0f}g")
 
-    top = st.columns(4)
-    goal = top[0].selectbox("目的", ["増量","維持","回復","ダイエット"], index=1, key="meal_goal")
-    intensity = top[1].selectbox("運動強度", ["低","中","高"], index=1, key="meal_intensity")
-    weight = top[2].number_input("体重（kg）", 20.0, 150.0,
-                              value=float(st.session_state.get("meal_weight") or st.session_state.get("profile_weight_kg") or 45.0),
-                              step=0.1, key="meal_weight",
-                              on_change=lambda: _weight_on_change(code_hash, "meal_weight", write_back_profile=True))
-    top[3].caption(f"競技：{sport} / 年齢：{age_years:.1f}")
+    tabs = st.tabs(["朝食", "昼食", "夕食"])
 
-    _set_global_weight(code_hash, weight, write_back_profile=True)
+    def _meal_ui(prefix: str, title: str, allow_school: bool=False):
+        # 画像保存先
+        img_key = f"{prefix}_photo_bytes"
+        ai_key  = f"{prefix}_ai"
+        est_key = f"{prefix}_est"
 
-    targets = compute_targets_pfc(weight, age_years, sport, intensity, goal)
-    if goal == "ダイエット":
-        st.info("ダイエット（-2kg/月目安）：まずは間食・甘い飲料・揚げ物の頻度を下げ、主食は『普→少』に調整。たんぱく質は毎食しっかり（魚/肉/卵/大豆）。")
-    st.markdown("### 目標（P/F/C）")
-    t1,t2,t3,t4 = st.columns(4)
-    t1.metric("炭水化物", f"{targets['c_g']:.0f} g")
-    t2.metric("たんぱく質", f"{targets['p_g']:.0f} g")
-    t3.metric("脂質", f"{targets['f_g']:.0f} g")
-    t4.metric("総カロリー", f"{targets['kcal']:.0f} kcal")
+        is_school = False
+        if allow_school:
+            is_school = st.checkbox("給食（写真なし）", key=f"{prefix}_school", value=bool(st.session_state.get(f"{prefix}_school") or False))
+            if is_school:
+                st.info("給食の日はチェックのみでOKです。必要なら後から写真を追加してください。")
+                st.session_state[ai_key] = {"mode":"school"}
+                st.session_state[est_key] = {"p":0.0,"c":0.0,"f":0.0,"kcal":0.0,"menu":"school"}
+                return st.session_state[est_key]
 
+        with st.container(border=True):
+            up = st.file_uploader("食事の写真アップロード（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_up")
+            if up is not None:
+                img_bytes = up.getvalue()
+                st.session_state[img_key] = img_bytes
 
-    with st.expander("朝食", expanded=True):
-        b = meal_block("b", "朝食", True, targets)
+            img_bytes = st.session_state.get(img_key)
+            if img_bytes:
+                st.image(img_bytes, width=140, caption="プレビュー（小）")
 
-    # --- 昼食（給食なら簡易、給食でないなら朝夕と同等に）---
-    with st.expander("昼食", expanded=False):
-        st.markdown("#### 昼食")
-        is_school = st.checkbox("給食（学校の標準的な昼食）", value=True, key="l_is_school")
-        if is_school:
-            st.caption("給食の日は、ざっくり推定（kcal/PFC）にとどめます。メニューが分かれば入力してください。")
-            menu = st.text_area("メニュー（分かる範囲で）", key="l_menu", placeholder="例：ごはん、鶏の照り焼き、みそ汁、牛乳…")
-            lk = st.number_input("推定カロリー（kcal）", 0.0, 2000.0, value=650.0, step=10.0, key="l_kcal_simple")
-            lp = st.number_input("たんぱく質（g）", 0.0, 200.0, value=25.0, step=1.0, key="l_p_simple")
-            lc = st.number_input("炭水化物（g）", 0.0, 400.0, value=90.0, step=1.0, key="l_c_simple")
-            lf = st.number_input("脂質（g）", 0.0, 200.0, value=18.0, step=1.0, key="l_f_simple")
-            l = {"p": float(lp), "c": float(lc), "f": float(lf), "kcal": float(lk), "menu": menu, "mode": "school"}
-        else:
-            st.caption("給食でない日は、朝食・夕食と同じように写真AI＋詳細推定で入力します。")
-            l = meal_block("l", "昼食", True, targets)
-            l["mode"] = "normal"
+                if st.button("AI食事解析", key=f"{prefix}_analyze_btn"):
+                    data, err = analyze_meal_photo(img_bytes, title)
+                    if err:
+                        st.error(f"解析に失敗しました: {err}")
+                    else:
+                        # 食事判定
+                        is_food = bool(data.get("is_food", True))
+                        conf = float(data.get("confidence") or 0.0)
+                        if (not is_food) or conf < 0.35:
+                            st.error("この画像は食事写真として解析できませんでした。食事が写るように撮り直してください。")
+                            st.session_state.pop(ai_key, None)
+                            st.session_state.pop(est_key, None)
+                        else:
+                            st.session_state[ai_key] = data
+                            # 推定（AIの量感から）
+                            carb = data.get("carb","普")
+                            protein = data.get("protein","普")
+                            veg = data.get("veg","普")
+                            fat = data.get("fat","普")
+                            fried = bool(data.get("fried_or_oily", False))
+                            dairy = bool(data.get("dairy", False))
+                            fruit = bool(data.get("fruit", False))
+                            est = meal_estimate(carb, protein, veg, fried, dairy, fruit)
+                            est["items"] = data.get("items") or []
+                            est["note"] = data.get("note") or ""
+                            est["levels"] = {"carb":carb,"protein":protein,"veg":veg,"fat":fat,"fried":fried,"dairy":dairy,"fruit":fruit}
+                            st.session_state[est_key] = est
 
-        # 昼食のAIコメント（しっかり）
-        if st.button("昼食のAIコメント（しっかり）", key="l_ai_comment_btn"):
-            # 目標との差分を昼の一言に落とす
-            targets_local = targets  # meal_page内のtargetsを参照
-            # ここでは昼食単体と、昼までの累計でコメントを作る
-            p_l = float(l.get("p", 0.0) or 0.0)
-            c_l = float(l.get("c", 0.0) or 0.0)
-            f_l = float(l.get("f", 0.0) or 0.0)
-            k_l = float(l.get("kcal", 0.0) or 0.0)
-            menu_txt = l.get("menu", "") if isinstance(l, dict) else ""
-            system = "You are a sports nutrition coach for junior athletes. Output Japanese. Be specific with grams/portions. No long preface."
-            user = f"""目的: {goal}
-運動強度: {intensity}
-体重: {weight} kg
-1日の目標: kcal={targets_local['kcal']:.0f}, C={targets_local['c_g']:.0f}g, P={targets_local['p_g']:.0f}g, F={targets_local['f_g']:.0f}g
-
-昼食（推定）:
-- kcal: {k_l:.0f}
-- C/P/F: {c_l:.0f}g / {p_l:.0f}g / {f_l:.0f}g
-- メニュー: {menu_txt if menu_txt else "不明（写真/入力ベース）"}
-お願い:
-- 昼食の評価（良い点/改善点）を短く
-- 今日は“夕食でどう帳尻を合わせるか”を具体量で提案（例：ごはん何g、肉/魚何g、牛乳/ヨーグルト量）
-- もし不足が大きければ、間食案（1〜2個）も提案（コンビニで買えるレベル）
-- 文章は見出し＋箇条書き中心で、読みやすく
-"""
-            text, err = ai_text(system, user)
-            if err:
-                st.error("AIコメントに失敗: " + err)
             else:
-                st.session_state["l_ai_comment_text"] = text
-        if st.session_state.get("l_ai_comment_text"):
-            ai_highlight_box("昼食のAIコメント（保存済み）", st.session_state.get("l_ai_comment_text",""))
+                st.info("写真をアップロードすると「AI食事解析」ボタンが表示されます。")
 
-    with st.expander("夕食", expanded=True):
+        # 結果表示
+        est = st.session_state.get(est_key)
+        if est:
+            st.markdown("##### 推定結果")
+            c1,c2,c3,c4 = st.columns(4)
+            c1.metric("kcal", f"{est['kcal']:.0f}")
+            c2.metric("P(g)", f"{est['p']:.0f}")
+            c3.metric("C(g)", f"{est['c']:.0f}")
+            c4.metric("F(g)", f"{est['f']:.0f}")
 
-        d = meal_block("d", "夕食", True, targets)
+            items = est.get("items") or []
+            if items:
+                st.caption("推定された内容: " + " / ".join(items[:8]))
+            if est.get("note"):
+                st.caption(est["note"])
 
-    tot_p = b["p"] + l["p"] + d["p"]
-    tot_c = b["c"] + l["c"] + d["c"]
-    tot_f = b["f"] + l["f"] + d["f"]
-    tot_k = b["kcal"] + l["kcal"] + d["kcal"]
-
-    st.markdown("### 1日の推定と評価")
-    r_p = eval_ratio(tot_p, targets["p_g"])
-    r_c = eval_ratio(tot_c, targets["c_g"])
-    r_f = eval_ratio(tot_f, targets["f_g"])
-    r_k = eval_ratio(tot_k, targets["kcal"])
-    e1,e2,e3,e4 = st.columns(4)
-    e1.metric("炭水化物", f"{tot_c:.0f} g", r_c)
-    e2.metric("たんぱく質", f"{tot_p:.0f} g", r_p)
-    e3.metric("脂質", f"{tot_f:.0f} g", r_f)
-    e4.metric("総カロリー", f"{tot_k:.0f} kcal", r_k)
-
-    
-    with st.expander("📅 食事ログ（カレンダー）", expanded=False):
-        rows = load_records(code_hash, limit=500)
-        meals = [r for r in rows if r.get("kind") == "meal_day"]
-        if not meals:
-            st.caption("まだ保存がありません。")
-        else:
-            # 日付ごとに集計（最新30日）
-            data = []
-            for r in meals:
+            # フィードバック（細かめ・間違ってもOK）
+            if st.button("この食事のAIコメント", key=f"{prefix}_comment_btn"):
                 try:
-                    dt = r.get("created_at","")[:10]  # YYYY-MM-DD
-                    pl = r.get("payload") or {}
-                    rt = (pl.get("ratings") or {})
-                    data.append({
-                        "date": dt,
-                        "p": rt.get("p",""),
-                        "c": rt.get("c",""),
-                        "f": rt.get("f",""),
-                        "kcal": rt.get("kcal","")
-                    })
-                except Exception:
-                    pass
-            dfm = pd.DataFrame(data).dropna()
-            if dfm.empty:
-                st.caption("ログが読み取れませんでした。")
-            else:
-                dfm = dfm.sort_values("date")
-                dfm = dfm.drop_duplicates(subset=["date"], keep="last")
-                dfm_tail = dfm.tail(31).reset_index(drop=True)
-                st.dataframe(dfm_tail, use_container_width=True, hide_index=True)
-                st.caption("※日付ごとに最新の食事ログ評価を表示しています（直近約1ヶ月）。")
+                    comment = ai_comment_for_meal(title, est, targets)
+                    st.session_state[f"{prefix}_comment"] = comment
+                except Exception as e:
+                    st.error(f"コメント生成に失敗しました: {e}")
 
-    if st.button("結果保存（食事ログ）", key="meal_save"):
-        save_record(code_hash, "meal_day",
-                    {"goal": goal, "intensity": intensity, "weight": weight, "targets": targets,
-                     "breakfast": b, "lunch": l, "dinner": d,
-                     "total": {"p": tot_p, "c": tot_c, "f": tot_f, "kcal": tot_k},
-                     "ratings": {"p": r_p, "c": r_c, "f": r_f, "kcal": r_k}},
-                    {"summary":"meal_day"})
-        st.success("保存しました。")
+            if st.session_state.get(f"{prefix}_comment"):
+                st.markdown(st.session_state[f"{prefix}_comment"])
 
+            # --- 調整（隠しUI）---
+            with st.expander("変更・追加（必要なときだけ）", expanded=False):
+                lv = est.get("levels") or {}
+                carb = st.selectbox("主食の量", ["少","普","多"], index=["少","普","多"].index(lv.get("carb","普")), key=f"{prefix}_adj_carb")
+                protein = st.selectbox("主菜の量", ["少","普","多"], index=["少","普","多"].index(lv.get("protein","普")), key=f"{prefix}_adj_protein")
+                veg = st.selectbox("野菜の量", ["少","普","多"], index=["少","普","多"].index(lv.get("veg","普")), key=f"{prefix}_adj_veg")
+                fat = st.selectbox("脂質（全体）", ["少","普","多"], index=["少","普","多"].index(lv.get("fat","普")), key=f"{prefix}_adj_fat")
+                fried = st.checkbox("揚げ物/油っぽい", value=bool(lv.get("fried", False)), key=f"{prefix}_adj_fried")
+                dairy = st.checkbox("乳製品あり", value=bool(lv.get("dairy", False)), key=f"{prefix}_adj_dairy")
+                fruit = st.checkbox("果物あり", value=bool(lv.get("fruit", False)), key=f"{prefix}_adj_fruit")
+                if st.button("再計算", key=f"{prefix}_recalc_btn"):
+                    new_est = meal_estimate(carb, protein, veg, fried, dairy, fruit)
+                    new_est["items"] = est.get("items") or []
+                    new_est["note"] = est.get("note") or ""
+                    new_est["levels"] = {"carb":carb,"protein":protein,"veg":veg,"fat":fat,"fried":fried,"dairy":dairy,"fruit":fruit}
+                    st.session_state[est_key] = new_est
+                    st.success("更新しました。")
 
+        return st.session_state.get(est_key) or {"p":0.0,"c":0.0,"f":0.0,"kcal":0.0}
+
+    with tabs[0]:
+        b = _meal_ui("b", "朝食", allow_school=False)
+    with tabs[1]:
+        l = _meal_ui("l", "昼食", allow_school=True)
+    with tabs[2]:
+        d = _meal_ui("d", "夕食", allow_school=False)
+
+    # 1日の合計（給食は0のまま＝チェックのみ）
+    total = {
+        "p": float(b.get("p",0))+float(l.get("p",0))+float(d.get("p",0)),
+        "c": float(b.get("c",0))+float(l.get("c",0))+float(d.get("c",0)),
+        "f": float(b.get("f",0))+float(l.get("f",0))+float(d.get("f",0)),
+        "kcal": float(b.get("kcal",0))+float(l.get("kcal",0))+float(d.get("kcal",0)),
+    }
     st.divider()
-    if st.button("記入データ読込", key="meal_load_bottom"):
-        payload = load_snapshot(code_hash, "meal_draft")
-        if payload:
-            for k,v in payload.items():
-                st.session_state[k] = v
-            st.success("読み込みました。")
-            st.rerun()
-        else:
-            st.info("保存データがありません。")
-    if st.button("保存", key="meal_save_bottom"):
-        keys = ["meal_goal","meal_intensity","meal_weight","b_c","b_p","b_v","b_dairy","b_fruit","b_fried","l_kyu","l_c","l_p","l_v","l_dairy","l_fruit","l_fried","d_c","d_p","d_v","d_dairy","d_fruit","d_fried"]
-        save_snapshot(code_hash, "meal_draft", {k: st.session_state.get(k) for k in keys})
+    st.markdown("### 今日の合計（目安）")
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("kcal", f"{total['kcal']:.0f}", delta=f"{(total['kcal']-targets['kcal']):+.0f}")
+    c2.metric("P(g)", f"{total['p']:.0f}", delta=f"{(total['p']-targets['p']):+.0f}")
+    c3.metric("C(g)", f"{total['c']:.0f}", delta=f"{(total['c']-targets['c']):+.0f}")
+    c4.metric("F(g)", f"{total['f']:.0f}", delta=f"{(total['f']-targets['f']):+.0f}")
+
+    # 保存
+    if st.button("今日の食事ログを保存", key="meal_save_simple"):
+        save_record(code_hash, "meal_log", {"b":b,"l":l,"d":d,"total":total,"targets":targets}, meta={"summary":"meal_log"})
+        save_snapshot(code_hash, "meal_draft", {"b":b,"l":l,"d":d})
         st.success("保存しました。")
 
-    # --- 保存済みAIコメント（コピーはここから） ---
+    jams_logo_footer()
     saved_ai_footer([
-        {"key": "l_ai_comment_text", "title": "🍱 食事管理：昼食のAIコメント"},
+        {"key": "meal_ai_text", "title": "🍽️ 食事：AIコメント"},
     ])
+
 
 
 def exercise_prescription_page(code_hash: str):
@@ -2548,7 +2492,7 @@ APP_PAGES = [
     ("soccer", "🎥 サッカー動画検索"),
 ]
 
-LINE_OFFICIAL_URL = os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip()  # 例: https://lin.ee/XXXX
+LINE_OFFICIAL_URL = (os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip() or "https://line.me/R/ti/p/@983prujv")  # 公式LINE（テスト）
 LINE_PREFILL_TEXT = os.getenv("KIWI_LINE_PREFILL_TEXT", "怪我の相談（アプリ）: ").strip()
 
 def _route_get():
