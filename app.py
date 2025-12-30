@@ -2625,7 +2625,6 @@ def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
         h = float(prof.get("height_cm") or 0.0)
     except Exception:
         h = 0.0
-ession_state.get("profile_weight_kg") or w)
         # seed tab weights (only if not manually edited)
         for k in WEIGHT_KEYS:
             if k not in st.session_state or float(st.session_state.get(k) or 0.0) <= 0.0:
