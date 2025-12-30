@@ -1666,9 +1666,8 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
         st.caption("基本：写真 → AI解析（必要な時だけ開いてください）")
         with st.expander("📸 写真を追加／解析", expanded=False):
             cap = st.file_uploader("写真を追加（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=False, key=f"{prefix}_uploader")
-            up = st.file_uploader("写真を選ぶ（アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_file")
 
-            chosen = cap if cap is not None else up
+            chosen = cap
             if chosen is not None:
                 img_bytes, err = _uploaded_image_to_jpeg_bytes(chosen)
                 if err:
@@ -2006,15 +2005,7 @@ def exercise_prescription_page(code_hash: str):
 
         # 入力UIは場所を取るので折りたたみ（食事管理と同じ方式）
         with st.expander("📸 写真を追加（カメラ/アルバム）", expanded=False):
-            thumb_w = st.slider(
-                "サムネイルサイズ",
-                min_value=70,
-                max_value=180,
-                value=int(st.session_state.get("tr_thumb_w", 88)),
-                step=5,
-                key="tr_thumb_w",
-            )
-            up = st.file_uploader(
+                        up = st.file_uploader(
                 "写真を追加（カメラ/アルバム）",
                 type=["jpg", "jpeg", "png", "heic", "heif"],
                 accept_multiple_files=False,
@@ -2039,31 +2030,26 @@ def exercise_prescription_page(code_hash: str):
                         st.success("写真を追加しました。")
                         st.rerun()
 
-        # サムネイル表示（小さく）＋「拡大」＋「画像を開く（別タブ）」
+        # サムネイル表示（食事管理と同じ：小さく、最大3枚）＋「画像を開く」＋「拡大」
         photos = st.session_state.get(photos_key, [])
         if photos:
-            st.caption("追加済み写真（最新6枚）")
-            show = photos[-6:]
-            # 3列グリッド
-            ncols = 3
+            st.caption("追加済み写真（最新3枚） ※「画像を開く」または「拡大」で表示")
+            show = photos[-3:]
+            cols = st.columns(len(show))
             import base64 as _b64
-            for row_start in range(0, len(show), ncols):
-                row = show[row_start:row_start + ncols]
-                cols = st.columns(len(row))
-                for i, p in enumerate(row):
-                    b64s = p.get("b64", "")
-                    try:
-                        b = _b64.b64decode(b64s)
-                        cols[i].image(b, width=int(st.session_state.get("tr_thumb_w", 88)))
-                    except Exception:
-                        cols[i].write("（画像）")
-                    # 別タブで直接開く
-                    cols[i].markdown(
-                        f'<a href="data:image/jpeg;base64,{b64s}" target="_blank" rel="noopener noreferrer">画像を開く</a>',
-                        unsafe_allow_html=True,
-                    )
-                    if cols[i].button("拡大", key=f"tr_zoom_{row_start+i}"):
-                        open_image_viewer(b64s, title="運動処方：内容メモの写真")
+            for i, p in enumerate(show):
+                b64s = p.get("b64", "")
+                try:
+                    b = _b64.b64decode(b64s)
+                    cols[i].image(b, width=88)
+                except Exception:
+                    cols[i].write("（画像）")
+                cols[i].markdown(
+                    f'<div style="text-align:center; margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" rel="noopener noreferrer" style="font-size:12px;">画像を開く</a></div>',
+                    unsafe_allow_html=True,
+                )
+                if cols[i].button("拡大", key=f"tr_zoom_{i}"):
+                    open_image_viewer(b64s, title="運動処方：内容メモの写真")
 
             if st.button("最後の写真を削除", key="tr_del_last_photo"):
                 st.session_state[photos_key] = photos[:-1]
