@@ -1730,7 +1730,7 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
         # 追加済み写真（上書きせず、最新3枚まで保持）
         photos = st.session_state.get(photos_key, [])
         if photos:
-            st.caption("追加済み写真（最新3枚） ※サムネをタップすると拡大表示")
+            st.caption("追加済み写真（最新3枚） ※「画像を開く」または「拡大」で表示")
             show = photos[-3:]
             cols = st.columns(len(show))
             for i, p in enumerate(show):
@@ -1739,6 +1739,8 @@ def meal_block(prefix: str, title: str, targets: dict, allow_photo: bool = True,
                     b64s = p.get("b64", "")
                     b = base64.b64decode(b64s)
                     cols[i].image(b, width=88)
+                    # クリックで開けるリンク（新しいタブ）
+                    cols[i].markdown(f'<div style="text-align:center;margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" style="font-size:12px;">画像を開く</a></div>', unsafe_allow_html=True)
                     if cols[i].button("拡大", key=f"{prefix}_zoom_{i}"):
                         open_image_viewer(b64s, title=f"{title}（写真）")
                 except Exception:
@@ -2037,7 +2039,7 @@ def exercise_prescription_page(code_hash: str):
 
         photos = st.session_state.get("tr_photos", [])
         if photos:
-            st.caption("保存済み写真（最新6枚） ※サムネをタップして拡大")
+            st.caption("保存済み写真（最新6枚） ※「画像を開く」または「拡大」で表示")
             show = photos[-6:]
             for row_start in range(0, len(show), 3):
                 row = show[row_start:row_start+3]
@@ -2048,6 +2050,8 @@ def exercise_prescription_page(code_hash: str):
                         b64s = p.get("b64", "")
                         b = base64.b64decode(b64s)
                         cols[i].image(b, width=int(st.session_state.get("tr_thumb_w", 88)))
+                        # クリックで開けるリンク（新しいタブ）
+                        cols[i].markdown(f'<div style="text-align:center;margin-top:4px;"><a href="data:image/jpeg;base64,{b64s}" target="_blank" style="font-size:12px;">画像を開く</a></div>', unsafe_allow_html=True)
                         if cols[i].button("拡大", key=f"tr_zoom_{row_start+i}"):
                             open_image_viewer(b64s, title="運動処方：内容メモの写真")
                     except Exception:
