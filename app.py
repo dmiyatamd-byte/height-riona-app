@@ -1228,6 +1228,29 @@ def openai_client():
         return None, str(e)
 
 
+
+def ai_text(system: str, user: str, *, model: str = "gpt-4.1-mini", temperature: float = 0.3, max_output_tokens: int = 700):
+    """テキスト生成ヘルパー。成功時 (text, None) / 失敗時 ("", err)"""
+    client, err = openai_client()
+    if err or client is None:
+        return "", err or "no client"
+    try:
+        resp = client.responses.create(
+            model=model,
+            input=[
+                {"role": "system", "content": [{"type": "input_text", "text": system or ""}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user or ""}]},
+            ],
+            temperature=temperature,
+            max_output_tokens=max_output_tokens,
+        )
+        return (resp.output_text or "").strip(), None
+    except Exception as e:
+        return "", str(e)
+
+
+
+
 def analyze_meal_photo(img_bytes: bytes, meal_type: str):
     """
     食事写真を解析して、量感（少/普/多）と特徴、食事内容の要約を返す。
@@ -1817,13 +1840,30 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
 
     # --- 写真（任意） ---
     if enable_photo:
-        up = st.file_uploader(
+        ups = st.file_uploader(
             f"{title}の写真（カメラ/アルバム）",
-            type=["jpg", "jpeg", "png"],
-            key=f"{prefix}_photo",
+            type=["jpg", "jpeg", "png", "heic", "heif"],
+            key=f"{prefix}_photos",
+            accept_multiple_files=True,
         )
-        if up is not None:
-            img_bytes = up.getvalue()
+        if ups:
+            # 複数枚サムネ（小さめ）
+            cols = st.columns(min(3, len(ups)))
+            img_list = []
+            for i, f in enumerate(ups):
+                try:
+                    b = f.getvalue()
+                except Exception:
+                    b = None
+                if not b:
+                    continue
+                img_list.append(b)
+                with cols[i % len(cols)]:
+                    st.image(b, width=120)
+            # 最初の1枚を代表として拡大表示
+            if img_list and st.button("拡大表示", key=f"{prefix}_photo_zoom"):
+                st.image(img_list[0], use_container_width=True)
+
 
             # 小サムネ（場所を取りすぎない）
             st.image(img_bytes, caption=None, width=160)
@@ -1834,11 +1874,48 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
 
             # AIで初期値セット（写真から、少/普/多を推測）
             if st.button("AIで写真から初期値セット", key=f"{prefix}_ai_set_btn"):
-                out, err = analyze_meal_photo(img_bytes, title)
-                if err or (out is None):
-                    st.error("写真解析に失敗: " + (err or "unknown"))
+                # 複数枚の結果をまとめて、少/普/多をざっくり推測
+                results = []
+                for b in img_list:
+                    out1, err1 = analyze_meal_photo(b, title)
+                    if err1 or (out1 is None):
+                        continue
+                    results.append(out1)
+                if not results:
+                    st.error("写真解析に失敗しました。別の写真でお試しください。")
                 else:
-                    # 食事判定ガード（非食事の誤爆対策）
+                    # 食事判定：過半数が食事であること
+                    food_votes = sum(1 for r in results if bool(r.get("is_food")))
+                    conf_max = max(float(r.get("confidence") or 0.0) for r in results)
+                    if food_votes < (len(results) / 2) and conf_max >= 0.35:
+                        st.error("この画像は食事写真として判定できませんでした。食事が写る写真でお願いします。")
+                    else:
+                        # mode（多数決）
+                        def _mode(key, default="普"):
+                            vals = [r.get(key) for r in results if r.get(key) in ("少","普","多")]
+                            if not vals:
+                                return default
+                            return max(set(vals), key=vals.count)
+                        st.session_state[f"{prefix}_sel_carb"] = _mode("carb", st.session_state[f"{prefix}_sel_carb"])
+                        st.session_state[f"{prefix}_sel_protein"] = _mode("protein", st.session_state[f"{prefix}_sel_protein"])
+                        st.session_state[f"{prefix}_sel_veg"] = _mode("veg", st.session_state[f"{prefix}_sel_veg"])
+                        st.session_state[f"{prefix}_sel_fat"] = _mode("fat", st.session_state[f"{prefix}_sel_fat"])
+                        st.session_state[f"{prefix}_fried"] = any(bool(r.get("fried_or_oily")) for r in results)
+                        st.session_state[f"{prefix}_dairy"] = any(bool(r.get("dairy")) for r in results)
+                        st.session_state[f"{prefix}_fruit"] = any(bool(r.get("fruit")) for r in results)
+                        # items/note
+                        items = []
+                        for r in results:
+                            for it in (r.get("items") or []):
+                                if isinstance(it, str) and it and it not in items:
+                                    items.append(it)
+                        note = " / ".join([r.get("note") for r in results if isinstance(r.get("note"), str) and r.get("note")][:2])
+                        st.session_state[f"{prefix}_ai_items"] = items
+                        st.session_state[f"{prefix}_ai_note"] = note
+                        st.success("AIが写真から量を推測しました（必要なら下の調整で微修正できます）。")
+
+
+            # 食事判定ガード（非食事の誤爆対策）
                     conf = float(out.get("confidence", 0.0) or 0.0)
                     if conf < 0.35:
                         st.warning("食事写真として判定できませんでした。食事が写るように撮り直すか、下の量選択で入力してください。")
