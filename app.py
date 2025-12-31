@@ -1301,6 +1301,65 @@ items(array of string), note(string), confidence(number)
     except Exception as e:
         return None, str(e)
 
+
+def merge_meal_analyses(items: list[dict]) -> dict:
+    """
+    複数枚の食事写真解析結果を統合する。
+    - 量感（少/普/多）は多数決（同票は「普」寄り）
+    - 有無フラグは OR
+    - items/note は統合
+    """
+    if not items:
+        return {"is_food": False, "confidence": 0.0}
+
+    def vote_level(key: str) -> str:
+        vals = [d.get(key) for d in items if d.get(key) in ("少", "普", "多")]
+        if not vals:
+            return "普"
+        counts = {"少": 0, "普": 0, "多": 0}
+        for v in vals:
+            counts[v] += 1
+        # 同票は普を優先
+        best = max(counts.items(), key=lambda kv: (kv[1], 1 if kv[0] == "普" else 0))[0]
+        return best
+
+    merged = {
+        "is_food": True,
+        "confidence": max(float(d.get("confidence") or 0.0) for d in items),
+        "carb": vote_level("carb"),
+        "protein": vote_level("protein"),
+        "veg": vote_level("veg"),
+        "fat": vote_level("fat"),
+        "fried_or_oily": any(bool(d.get("fried_or_oily")) for d in items),
+        "dairy": any(bool(d.get("dairy")) for d in items),
+        "fruit": any(bool(d.get("fruit")) for d in items),
+    }
+
+    # items を統合（重複除去、順序保持）
+    seen = set()
+    merged_items = []
+    for d in items:
+        lst = d.get("items") or []
+        if isinstance(lst, str):
+            lst = [s.strip() for s in lst.split("\n") if s.strip()]
+        for s in lst:
+            s = str(s).strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            merged_items.append(s)
+    merged["items"] = merged_items
+
+    notes = []
+    for d in items:
+        n = (d.get("note") or "").strip()
+        if n and n not in notes:
+            notes.append(n)
+    merged["note"] = " / ".join(notes)[:500]
+
+    return merged
+
+
 def ai_comment_for_meal(meal_title: str, est: dict, targets: dict):
     """短い食事コメントを生成。est/targetsは {p,c,f,kcal} を想定。"""
     def _num(v, d=0.0):
@@ -2003,7 +2062,7 @@ def meal_page(code_hash: str):
     # 目的（ダイエットあり）
     goal = st.selectbox("目的", ["増量", "維持", "回復", "ダイエット"], key="meal_goal", index=1)
     targets = calc_daily_targets(w, goal)  # 既存関数（-2kg/月は内部で反映）
-    st.caption(f"目標（1日）: kcal {targets.get('kcal',0):.0f} / P {targets.get('p', targets.get('p_g',0)):.0f}g / C {targets.get('c', targets.get('c_g',0)):.0f}g / F {targets.get('f', targets.get('f_g',0)):.0f}g")
+    st.caption(f"目標（1日）: kcal {targets.get('kcal',0):.0f} / タンパク質 {targets.get('p', targets.get('p_g',0)):.0f}g / 炭水化物 {targets.get('c', targets.get('c_g',0)):.0f}g / 脂質 {targets.get('f', targets.get('f_g',0)):.0f}g")
 
     tabs = st.tabs(["朝食", "昼食", "夕食"])
 
@@ -2023,43 +2082,56 @@ def meal_page(code_hash: str):
                 return st.session_state[est_key]
 
         with st.container(border=True):
-            up = st.file_uploader("食事の写真アップロード（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], key=f"{prefix}_up")
-            if up is not None:
-                img_bytes = up.getvalue()
-                st.session_state[img_key] = img_bytes
+            up = st.file_uploader("食事の写真アップロード（カメラ/アルバム）", type=["jpg","jpeg","png","heic","heif"], accept_multiple_files=True, key=f"{prefix}_up")
+            if up:
+                img_list = []
+                for f in up:
+                    try:
+                        b = f.getvalue()
+                        if b:
+                            img_list.append(b)
+                    except Exception:
+                        continue
+                if img_list:
+                    # 追加（上書きではなく、最新6枚まで保持）
+                    prev = st.session_state.get(img_key) or []
+                    if not isinstance(prev, list):
+                        prev = [prev]
+                    merged = (prev + img_list)[-6:]
+                    st.session_state[img_key] = merged
 
-            img_bytes = st.session_state.get(img_key)
-            if img_bytes:
-                st.image(img_bytes, width=140, caption="プレビュー（小）")
-
+            img_list = st.session_state.get(img_key) or []
+            if img_list:
+                st.caption("プレビュー（小）")
+                cols = st.columns(3)
+                for i, b in enumerate(img_list):
+                    with cols[i % 3]:
+                        st.image(b, width=110)
                 if st.button("AI食事解析", key=f"{prefix}_analyze_btn"):
-                    data, err = analyze_meal_photo(img_bytes, title)
-                    if err:
-                        st.error(f"解析に失敗しました: {err}")
-                    else:
-                        # 食事判定
+                    valid = []
+                    last_err = None
+                    for b in img_list:
+                        data, err = analyze_meal_photo(b, title)
+                        if err:
+                            last_err = err
+                            continue
                         is_food = bool(data.get("is_food", True))
                         conf = float(data.get("confidence") or 0.0)
-                        if (not is_food) or conf < 0.35:
-                            st.error("この画像は食事写真として解析できませんでした。食事が写るように撮り直してください。")
-                            st.session_state.pop(ai_key, None)
-                            st.session_state.pop(est_key, None)
-                        else:
-                            st.session_state[ai_key] = data
-                            # 推定（AIの量感から）
-                            carb = data.get("carb","普")
-                            protein = data.get("protein","普")
-                            veg = data.get("veg","普")
-                            fat = data.get("fat","普")
-                            fried = bool(data.get("fried_or_oily", False))
-                            dairy = bool(data.get("dairy", False))
-                            fruit = bool(data.get("fruit", False))
-                            est = meal_estimate(carb, protein, veg, fried, dairy, fruit)
-                            est["items"] = data.get("items") or []
-                            est["note"] = data.get("note") or ""
-                            est["levels"] = {"carb":carb,"protein":protein,"veg":veg,"fat":fat,"fried":fried,"dairy":dairy,"fruit":fruit}
-                            st.session_state[est_key] = est
+                        if is_food and conf >= 0.35:
+                            valid.append(data)
+                    if not valid:
+                        st.error("この画像は食事写真として解析できませんでした。食事が写るように撮り直してください。")
+                        if last_err:
+                            st.caption(f"詳細: {last_err}")
+                        st.session_state.pop(ai_key, None)
+                        st.session_state.pop(est_key, None)
+                    else:
+                        merged_data = merge_meal_analyses(valid)
+                        st.session_state[ai_key] = merged_data
 
+                        # 推定（AIの量感から）
+                        est = estimate_macros_from_levels(merged_data, w, goal)
+                        st.session_state[est_key] = est
             else:
                 st.info("写真をアップロードすると「AI食事解析」ボタンが表示されます。")
 
@@ -2069,9 +2141,9 @@ def meal_page(code_hash: str):
             st.markdown("##### 推定結果")
             c1,c2,c3,c4 = st.columns(4)
             c1.metric("kcal", f"{est['kcal']:.0f}")
-            c2.metric("P(g)", f"{est['p']:.0f}")
-            c3.metric("C(g)", f"{est['c']:.0f}")
-            c4.metric("F(g)", f"{est['f']:.0f}")
+            c2.metric("タンパク質(g)", f"{est['p']:.0f}")
+            c3.metric("炭水化物(g)", f"{est['c']:.0f}")
+            c4.metric("脂質(g)", f"{est['f']:.0f}")
 
             items = est.get("items") or []
             if items:
@@ -2128,9 +2200,9 @@ def meal_page(code_hash: str):
     st.markdown("### 今日の合計（目安）")
     c1,c2,c3,c4 = st.columns(4)
     c1.metric("kcal", f"{total['kcal']:.0f}", delta=f"{(total['kcal']-targets['kcal']):+.0f}")
-    c2.metric("P(g)", f"{total['p']:.0f}", delta=f"{(total['p']-targets['p']):+.0f}")
-    c3.metric("C(g)", f"{total['c']:.0f}", delta=f"{(total['c']-targets['c']):+.0f}")
-    c4.metric("F(g)", f"{total['f']:.0f}", delta=f"{(total['f']-targets['f']):+.0f}")
+    c2.metric("タンパク質(g)", f"{total['p']:.0f}", delta=f"{(total['p']-targets['p']):+.0f}")
+    c3.metric("炭水化物(g)", f"{total['c']:.0f}", delta=f"{(total['c']-targets['c']):+.0f}")
+    c4.metric("脂質(g)", f"{total['f']:.0f}", delta=f"{(total['f']-targets['f']):+.0f}")
 
     # 保存
     if st.button("今日の食事ログを保存", key="meal_save_simple"):
