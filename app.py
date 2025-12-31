@@ -2107,6 +2107,14 @@ def meal_page(code_hash: str):
                 for i, b in enumerate(img_list):
                     with cols[i % 3]:
                         st.image(b, width=110)
+                        if st.button("削除", key=f"{prefix}_del_{i}"):
+                            new_list = [x for j, x in enumerate(img_list) if j != i]
+                            st.session_state[img_key] = new_list
+                            # 解析結果もリセット（画像が変わったため）
+                            st.session_state.pop(ai_key, None)
+                            st.session_state.pop(est_key, None)
+                            st.session_state.pop(f"{prefix}_comment", None)
+                            st.rerun()
                 if st.button("AI食事解析", key=f"{prefix}_analyze_btn"):
                     valid = []
                     last_err = None
@@ -2843,7 +2851,7 @@ def profile_top_page(code_hash: str):
             _b_date = _dt.date.fromisoformat(_b) if _b else _dt.date(2010,1,1)
         except Exception:
             _b_date = _dt.date(2010,1,1)
-        birth = st.date_input("生年月日", value=_b_date, key="pf_birth")
+        birth = st.date_input("生年月日", value=_b_date, min_value=_dt.date(1900,1,1), max_value=_dt.date.today(), key="pf_birth")
         _h0 = float(prof.get("height_cm") or 0.0)
         _w0 = float(prof.get("weight_kg") or 0.0)
         if _h0 < 50.0:
