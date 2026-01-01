@@ -3107,8 +3107,8 @@ def menu_select_page():
         c1, c2 = st.columns(2, gap="small")
         with c1:
             st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
-            if st.button(left[1], key=f"menu_{left[0]}", use_container_width=True):
-            st.markdown('</div>', unsafe_allow_html=True)
+    # --- FIX: removed empty if block ---
+    pass
                 _route_set(left[0]); st.rerun()
         with c2:
             if right:
