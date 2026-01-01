@@ -2469,6 +2469,10 @@ def meal_page(code_hash: str):
                 else:
                     ai_txt = str(ai_val)
                 ai_txt = ai_txt.strip()
+                # 表示用の整形（"\n" などのエスケープが残っていたら改行に戻す）
+                ai_txt = ai_txt.replace("\\n", "\n")
+                ai_txt = ai_txt.replace("／ｎ", "\n").replace("/ｎ", "\n").replace("／n", "\n").replace("/n", "\n")
+                ai_txt = ai_txt.replace("\r\n", "\n")
 
                 cmt_val = info.get("comment")
                 if cmt_val is None:
