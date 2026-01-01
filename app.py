@@ -2434,8 +2434,20 @@ def meal_page(code_hash: str):
                 info = snap_today.get(pref) or {}
                 if not isinstance(info, dict):
                     continue
-                ai_txt = (info.get("ai") or "").strip()
-                user_cmt = (info.get("comment") or "").strip()
+                ai_val = info.get("ai")
+                if ai_val is None:
+                    ai_txt = ""
+                elif isinstance(ai_val, (dict, list)):
+                    ai_txt = json.dumps(ai_val, ensure_ascii=False, default=str)
+                else:
+                    ai_txt = str(ai_val)
+                ai_txt = ai_txt.strip()
+
+                cmt_val = info.get("comment")
+                if cmt_val is None:
+                    user_cmt = ""
+                else:
+                    user_cmt = str(cmt_val).strip()
 
                 if ai_txt or user_cmt:
                     st.markdown("---")
