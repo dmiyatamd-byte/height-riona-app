@@ -3087,7 +3087,6 @@ def profile_top_page(code_hash: str):
                 st.rerun()
 
         st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
 
 def menu_select_page():
     st.markdown('<div class="km-menu-title">やりたいことを選んでください</div>', unsafe_allow_html=True)
