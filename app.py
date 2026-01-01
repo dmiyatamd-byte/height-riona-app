@@ -103,6 +103,47 @@ IGF1_RANGES = {
 # UI
 # =========================
 
+
+
+def clipboard_copy_button(label: str, text: str, key: str, height: int = 56):
+    """ワンタップでクリップボードにコピー（スマホでも使いやすい）"""
+    try:
+        payload = json.dumps(text or "", ensure_ascii=False)
+    except Exception:
+        payload = json.dumps(str(text or ""), ensure_ascii=False)
+    components.html(
+        f"""
+        <div style="margin: 6px 0 10px 0;">
+          <button id="{key}" style="
+            width: 100%;
+            padding: 14px 14px;
+            font-size: 18px;
+            font-weight: 700;
+            border-radius: 14px;
+            border: 1px solid #d0d0d0;
+            background: white;
+            cursor: pointer;
+          ">📋 {label}</button>
+        </div>
+        <script>
+          const btn = document.getElementById("{key}");
+          if(btn) {{
+            btn.onclick = async () => {{
+              try {{
+                await navigator.clipboard.writeText({payload});
+                btn.innerText = "✅ コピーしました";
+                setTimeout(()=>{{ btn.innerText = "📋 {label}"; }}, 1400);
+              }} catch(e) {{
+                btn.innerText = "⚠️ コピーできません";
+                setTimeout(()=>{{ btn.innerText = "📋 {label}"; }}, 1600);
+              }}
+            }};
+          }}
+        </script>
+        """,
+        height=height,
+    )
+
 def _find_jams_logo_path():
     candidates = [
         "JAMSロゴ.png",
@@ -2921,6 +2962,14 @@ def injury_page(code_hash: str):
             ai_highlight_box("🩹 怪我AIコメント（保存されます）", text)
             st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
+            # --- 公式LINE貼り付け用（40代でも迷わない） ---
+            st.markdown("### 📲 公式LINEに貼る（このまま使えます）")
+            st.caption("下の文章をコピーして、公式LINEのトークに貼り付けてください。")
+            st.text_area("LINE貼り付け用テキスト", text, height=220, key="inj_line_text")
+            clipboard_copy_button("LINEに貼る文章をコピー", text, key="inj_copy_line_btn")
+            if "LINE_OFFICIAL_URL" in globals():
+                st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
+
     if st.button("怪我ログを保存", key="inj_save"):
         save_record(code_hash, "injury_log",
                     {"sport": sport, "locations": locs, "pain": pain, "onset": onset,
@@ -3048,11 +3097,6 @@ def sleep_page(code_hash: str):
         )
         update_streak_on_save(code_hash)
         st.success("保存しました。")
-
-    # --- 保存済みAIコメント ---
-    saved_ai_footer([
-        {"key": "sl_ai_text", "title": "😴 睡眠：AIアドバイス"},
-    ])
 
 
 
