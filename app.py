@@ -2437,7 +2437,34 @@ def meal_page(code_hash: str):
                 ai_val = info.get("ai")
                 if ai_val is None:
                     ai_txt = ""
-                elif isinstance(ai_val, (dict, list)):
+                elif isinstance(ai_val, dict):
+                    note = str(ai_val.get("note") or "").strip()
+                    items = ai_val.get("items") or []
+                    def _lv(k):
+                        v = ai_val.get(k)
+                        return v if v in ("少","普","多") else None
+                    lv_c = _lv("carb"); lv_p = _lv("protein"); lv_v = _lv("veg"); lv_f = _lv("fat")
+                    parts = []
+                    if any([lv_c, lv_p, lv_v, lv_f]):
+                        parts.append("推定（目安）: " + " / ".join([x for x in [
+                            f"炭水化物={lv_c}" if lv_c else "",
+                            f"タンパク質={lv_p}" if lv_p else "",
+                            f"野菜={lv_v}" if lv_v else "",
+                            f"脂質={lv_f}" if lv_f else "",
+                        ] if x]))
+                    flags = []
+                    if ai_val.get("fried_or_oily") is True: flags.append("揚げ物/油多め")
+                    if ai_val.get("dairy") is True: flags.append("乳製品あり")
+                    if ai_val.get("fruit") is True: flags.append("果物あり")
+                    if flags:
+                        parts.append("補足: " + " / ".join(flags))
+                    if isinstance(items, list) and items:
+                        parts.append("推定された品目: " + " / ".join([str(x) for x in items[:30]]))
+                    if note:
+                        parts.append("コメント: " + note)
+                    ai_txt = "\\n".join([p for p in parts if p])
+
+                elif isinstance(ai_val, list):
                     ai_txt = json.dumps(ai_val, ensure_ascii=False, default=str)
                 else:
                     ai_txt = str(ai_val)
