@@ -2688,7 +2688,7 @@ def injury_page(code_hash: str):
 
     cols = st.columns(3)
     locs = []
-    loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "太もも", "ハムストリング", "膝", "足首", "踵/足底"]
+    loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "太もも", "ハムストリング", "膝", "ふくらはぎ", "足首", "踵/足底"]
     for i, loc in enumerate(loc_list):
         with cols[i % 3]:
             if st.checkbox(loc, key=f"inj_loc_{loc}"):
@@ -2717,6 +2717,13 @@ def injury_page(code_hash: str):
                     extra[f"{loc}_weak"] = st.checkbox("力が入りにくい", key=f"inj_{loc}_weak")
                 if loc in ["背中/腰"]:
                     extra[f"{loc}_legpain"] = st.checkbox("脚の方に痛み/しびれが走る", key=f"inj_{loc}_rad")
+
+                if loc in ["ふくらはぎ"]:
+                    extra[f"{loc}_sudden_pop"] = st.checkbox("走った/蹴った瞬間に『ブチッ/ピキッ』とした感じがあった", key=f"inj_{loc}_pop")
+                    extra[f"{loc}_tightness"] = st.checkbox("つっぱる/攣りそうな感じが強い", key=f"inj_{loc}_tight")
+                    extra[f"{loc}_push_off_pain"] = st.checkbox("つま先立ち（蹴り出し）で痛い", key=f"inj_{loc}_push")
+                    extra[f"{loc}_walking_pain"] = st.checkbox("歩くだけでも痛い", key=f"inj_{loc}_walk")
+                    extra[f"{loc}_localized"] = st.selectbox("痛い場所の中心", ["中央", "内側", "外側", "アキレス腱寄り"], index=0, key=f"inj_{loc}_spot")
                 extra[f"{loc}_worse"] = st.selectbox("一番つらい動き", ["走る", "ジャンプ", "切り返し", "蹴る", "投げる", "日常動作"], index=0, key=f"inj_{loc}_worse")
 
     st.markdown("### 直ぐにできる対応")
