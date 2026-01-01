@@ -2020,7 +2020,7 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
                 with cols[i % len(cols)]:
                     st.image(b, width=120)
             # 最初の1枚を代表として拡大表示
-            if img_list and st.button("拡大表示", key=f"{prefix}_photo_zoom"):
+            if img_list and st.button("拡大表示", key=f"{prefix}_photo_zoom_grid"):
                 st.image(img_list[0], use_container_width=True)
 
 
@@ -2028,7 +2028,7 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
             st.image(img_bytes, caption=None, width=160)
 
             # 拡大（ページ内）
-            if st.button("拡大表示", key=f"{prefix}_photo_zoom"):
+            if st.button("拡大表示", key=f"{prefix}_photo_zoom_single"):
                 st.image(img_bytes, caption=None, use_container_width=True)
 
             # AIで初期値セット（写真から、少/普/多を推測）
