@@ -2429,6 +2429,30 @@ def meal_page(code_hash: str):
             c3.metric("炭水化物(g)", f"{float(total_s.get('c',0)):.0f}", delta=f"{(float(total_s.get('c',0))-float(targets_s.get('c',targets_s.get('c_g',0)))):+.0f}")
             c4.metric("脂質(g)", f"{float(total_s.get('f',0)):.0f}", delta=f"{(float(total_s.get('f',0))-float(targets_s.get('f',targets_s.get('f_g',0)))):+.0f}")
 
+            # 各食事のAIコメント（保存済み）を表示
+            for pref, title in [("b", "朝食"), ("l", "昼食"), ("d", "夕食")]:
+                info = snap_today.get(pref) or {}
+                if not isinstance(info, dict):
+                    continue
+                ai_txt = (info.get("ai") or "").strip()
+                user_cmt = (info.get("comment") or "").strip()
+
+                if ai_txt or user_cmt:
+                    st.markdown("---")
+                    st.markdown(f"#### {title}")
+                if user_cmt:
+                    st.markdown("**メモ（本人/保護者）**")
+                    st.write(user_cmt)
+                if ai_txt:
+                    st.markdown("**AIコメント**")
+                    st.write(ai_txt)
+                    if st.button("AIコメントをコピー", key=f"copy_saved_ai_{pref}", use_container_width=True):
+                        st.session_state["__copy_buffer"] = ai_txt
+            if st.session_state.get("__copy_buffer"):
+                with st.expander("📋 コピー用テキスト", expanded=False):
+                    st.code(st.session_state.get("__copy_buffer") or "", language="text")
+
+
 
 
     st.caption(
