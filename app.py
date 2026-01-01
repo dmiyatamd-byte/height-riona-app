@@ -2932,7 +2932,6 @@ def soccer_video_page(code_hash: str):
 # =========================
 
 APP_PAGES = [
-    ("profile", "👤 個人情報"),
     ("exercise", "🏋️ 運動処方"),
     ("meal", "🍽 食事管理"),
     ("height", "📏 身長予測"),
@@ -2940,6 +2939,7 @@ APP_PAGES = [
     ("injury", "🩹 怪我の相談"),
     ("sleep", "😴 睡眠の質"),
     ("soccer", "🎥 サッカー動画検索"),
+    ("profile", "👤 個人情報"),
 ]
 
 LINE_OFFICIAL_URL = (os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip() or "https://line.me/R/ti/p/@983prujv")  # 公式LINE（テスト）
