@@ -139,6 +139,81 @@ def jams_logo_footer():
 def apply_css():
     st.markdown("""
     <style>
+      /* === Mobile-first readability (40代でも迷わず押せる) === */
+      html, body, [class*="css"] { font-size: 17px; }
+      @media (max-width: 640px){
+        html, body, [class*="css"] { font-size: 19px; }
+        .block-container { padding-left: 0.85rem; padding-right: 0.85rem; }
+      }
+
+      /* Buttons */
+      .stButton > button {
+        font-size: 18px !important;
+        font-weight: 800 !important;
+        padding: 0.85rem 0.9rem !important;
+        border-radius: 14px !important;
+        min-height: 56px !important;
+      }
+      @media (max-width: 640px){
+        .stButton > button{
+          font-size: 20px !important;
+          min-height: 64px !important;
+          padding: 1.0rem 1.0rem !important;
+          border-radius: 16px !important;
+        }
+      }
+
+      /* Inputs */
+      .stTextInput input, .stNumberInput input, .stDateInput input, .stTimeInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div{
+        font-size: 18px !important;
+        min-height: 52px !important;
+      }
+      @media (max-width: 640px){
+        .stTextInput input, .stNumberInput input, .stDateInput input, .stTimeInput input, .stTextArea textarea, .stSelectbox div[data-baseweb="select"] > div{
+          font-size: 20px !important;
+          min-height: 56px !important;
+        }
+      }
+
+      /* Section headings */
+      h1, h2, h3 { letter-spacing: -0.01em; }
+      h2 { font-size: 1.45rem !important; }
+      @media (max-width: 640px){
+        h2 { font-size: 1.55rem !important; }
+      }
+
+      /* Make radio/checkbox labels easier to tap */
+      label[data-baseweb="checkbox"], label[data-baseweb="radio"] { padding-top: 10px; padding-bottom: 10px; }
+
+      /* Menu: keep 2 buttons per row, big and tappable */
+      .km-menu-title{ font-size: 22px; font-weight: 900; margin: 6px 0 8px 0; }
+      @media (max-width: 640px){ .km-menu-title{ font-size: 24px; } }
+      .km-menu-sub{ color: rgba(0,0,0,0.65); font-size: 15px; margin-bottom: 10px; }
+      @media (max-width: 640px){ .km-menu-sub{ font-size: 16px; } }
+
+      .km-bigbtn .stButton > button{
+        min-height: 78px !important;
+        font-size: 20px !important;
+      }
+      @media (max-width: 640px){
+        .km-bigbtn .stButton > button{
+          min-height: 92px !important;
+          font-size: 22px !important;
+        }
+      }
+
+      /* Back-to-menu button should also be large */
+      .km-navbtn .stButton > button{
+        min-height: 60px !important;
+        font-size: 18px !important;
+      }
+      @media (max-width: 640px){
+        .km-navbtn .stButton > button{
+          min-height: 68px !important;
+          font-size: 20px !important;
+        }
+      }
+    
       .block-container { padding-top: 2.2rem; }
       div[data-testid="stHorizontalBlock"] { gap: 6px !important; padding: 0 4px; }
 div[data-testid="stHorizontalBlock"]::after{ content:""; display:block; height:1px; background: rgba(0,0,0,0.10); margin-top:-1px; }
@@ -266,8 +341,11 @@ div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:ch
 .km-muted{color:rgba(0,0,0,0.55); font-size:0.85rem;}
 .km-title{font-weight:700; font-size:1.05rem; margin:0 0 6px 0;}
 .km-grid button[kind="secondary"], .km-grid button[kind="primary"]{width:100%;}
-.km-bigbtn button{height:64px !important; border-radius:16px !important; font-weight:700 !important;}
+.km-bigbtn button{height:68px !important; border-radius:16px !important; font-weight:800 !important; font-size:18px !important;}
 .km-bigbtn .stButton>button{width:100%;}
+@media (max-width: 640px){
+  .km-bigbtn button{height:76px !important; font-size:20px !important;}
+}
 .km-topbar{display:flex; gap:8px; align-items:center; justify-content:space-between; margin:8px 0 14px;}
 .km-navbtn .stButton>button{border-radius:14px; padding:10px 12px; width:100%;}
 .km-bottom{position:sticky; bottom:0; z-index:10; padding:10px 0 8px 0; background:linear-gradient(to top, rgba(255,255,255,0.98), rgba(255,255,255,0.65), rgba(255,255,255,0));}
@@ -2878,10 +2956,10 @@ def _nav_to_menu():
 
 def _nav_button_to_menu(position: str = "top"):
     # position is only for key uniqueness
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        if st.button("⬅️ 機能選択へ戻る", key=f"to_menu_{position}", use_container_width=True):
-            _nav_to_menu()
+    st.markdown('<div class="km-navbtn">', unsafe_allow_html=True)
+    if st.button("⬅️ 機能選択へ戻る", key=f"to_menu_{position}", use_container_width=True):
+        _nav_to_menu()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def _load_profile(code_hash: str) -> dict:
     d = load_snapshot(code_hash, "profile") or {}
@@ -3012,6 +3090,8 @@ def profile_top_page(code_hash: str):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def menu_select_page():
+    st.markdown('<div class="km-menu-title">やりたいことを選んでください</div>', unsafe_allow_html=True)
+    st.markdown('<div class="km-menu-sub">迷ったら、いちばん気になる項目を1つ選べばOKです。</div>', unsafe_allow_html=True)
     st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
     st.markdown("## 機能を選択")
     st.markdown('<div class="km-muted">タップして開始します</div>', unsafe_allow_html=True)
@@ -3027,11 +3107,15 @@ def menu_select_page():
         right = pairs[i+1] if i+1 < len(pairs) else None
         c1, c2 = st.columns(2, gap="small")
         with c1:
+            st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
             if st.button(left[1], key=f"menu_{left[0]}", use_container_width=True):
+            st.markdown('</div>', unsafe_allow_html=True)
                 _route_set(left[0]); st.rerun()
         with c2:
             if right:
+                st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
                 if st.button(right[1], key=f"menu_{right[0]}", use_container_width=True):
+                st.markdown('</div>', unsafe_allow_html=True)
                     _route_set(right[0]); st.rerun()
             else:
                 st.write("")
@@ -3039,10 +3123,14 @@ def menu_select_page():
     # last row: サッカー動画検索 + 個人情報
     c1, c2 = st.columns(2, gap="small")
     with c1:
+        st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
         if st.button(last[1], key=f"menu_{last[0]}", use_container_width=True):
+        st.markdown('</div>', unsafe_allow_html=True)
             _route_set(last[0]); st.rerun()
     with c2:
+        st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
         if st.button("👤 個人情報", key="menu_profile_edit", use_container_width=True):
+        st.markdown('</div>', unsafe_allow_html=True)
             _route_set("profile_edit"); st.rerun()
 
     st.markdown('</div>', unsafe_allow_html=True)  # km-grid
