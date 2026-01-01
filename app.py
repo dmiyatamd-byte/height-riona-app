@@ -2401,41 +2401,34 @@ def meal_page(code_hash: str):
     # 体重はプロフィールから初期値（ウィジェット作成前に同期済み）
     w = float(st.session_state.get("meal_weight") or st.session_state.get("profile_weight_kg") or 45.0)
 
-    goal = st.selectbox("目的", ["増量", "維持", "回復", "ダイエット"], key="meal_goal", index=1)
-    targets = calc_daily_targets(w, goal)
-
-    # 既に今日の食事ログを保存している場合は、ログアウト後でも復元できるように表示/復元する
-    snap = load_meal_today_snapshot(code_hash)
-    if snap and not st.session_state.get("_meal_today_restored", False):
-        st.session_state["_meal_today_restored"] = True
+    # ---- 今日の保存済み食事ログをセッションへ復元（ウィジェット生成前に行う）----
+    snap_today = load_meal_today_snapshot(code_hash)
+    if snap_today and not st.session_state.get("_meal_today_restored_once", False):
+        st.session_state["_meal_today_restored_once"] = True
         try:
-            st.session_state["meal_goal"] = snap.get("meal_goal", st.session_state.get("meal_goal"))
-            st.session_state["meal_weight"] = snap.get("meal_weight", st.session_state.get("meal_weight"))
-            # restore per-meal AI outputs (photos themselves are not restored)
-            for pref in ["b", "l", "d"]:
-                if isinstance(snap.get(pref), dict):
-                    st.session_state[f"{pref}_est"] = snap[pref].get("est", st.session_state.get(f"{pref}_est"))
-                    st.session_state[f"{pref}_ai"] = snap[pref].get("ai", st.session_state.get(f"{pref}_ai"))
-                    st.session_state[f"{pref}_comment"] = snap[pref].get("comment", st.session_state.get(f"{pref}_comment"))
-                    if "school" in snap[pref]:
-                        st.session_state[f"{pref}_school"] = snap[pref].get("school")
+            if snap_today.get("meal_goal") is not None:
+                st.session_state["meal_goal"] = snap_today.get("meal_goal")
+            if snap_today.get("meal_weight") is not None:
+                st.session_state["meal_weight"] = snap_today.get("meal_weight")
         except Exception:
             pass
 
-        with st.expander("✅ 今日の保存済み食事ログ（ログアウトしても残ります）", expanded=True):
+
+    goal = st.selectbox("目的", ["増量", "維持", "回復", "ダイエット"], key="meal_goal", index=1)
+    targets = calc_daily_targets(w, goal)
+
+    # ---- 今日の保存済み食事ログ（表示のみ：ログアウトしても残ります）----
+    if snap_today:
+        with st.expander("✅ 今日の保存済み食事ログ（ログアウトしても残ります）", expanded=False):
             st.write("※ 写真は復元しません（容量・安定性のため）。AI推定結果とコメント、合計は復元します。")
-            total_s = (snap.get("total") or {})
-            targets_s = (snap.get("targets") or {})
+            total_s = (snap_today.get("total") or {})
+            targets_s = (snap_today.get("targets") or {})
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("kcal", f"{float(total_s.get('kcal',0)):.0f}", delta=f"{(float(total_s.get('kcal',0))-float(targets_s.get('kcal',0))):+.0f}")
             c2.metric("タンパク質(g)", f"{float(total_s.get('p',0)):.0f}", delta=f"{(float(total_s.get('p',0))-float(targets_s.get('p',targets_s.get('p_g',0)))):+.0f}")
             c3.metric("炭水化物(g)", f"{float(total_s.get('c',0)):.0f}", delta=f"{(float(total_s.get('c',0))-float(targets_s.get('c',targets_s.get('c_g',0)))):+.0f}")
             c4.metric("脂質(g)", f"{float(total_s.get('f',0)):.0f}", delta=f"{(float(total_s.get('f',0))-float(targets_s.get('f',targets_s.get('f_g',0)))):+.0f}")
-            for pref, title in [("b","朝食"),("l","昼食"),("d","夕食")]:
-                info = snap.get(pref) or {}
-                if info.get("ai"):
-                    st.markdown(f"**{title}：AIコメント**")
-                    st.write(info.get("ai"))
+
 
 
     st.caption(
