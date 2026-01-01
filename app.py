@@ -3089,51 +3089,36 @@ def profile_top_page(code_hash: str):
         st.markdown('</div>', unsafe_allow_html=True)
 
 def menu_select_page():
+    # 40代の親が迷わず押せる：大きい2列ボタン（スマホ最適）
     st.markdown('<div class="km-menu-title">やりたいことを選んでください</div>', unsafe_allow_html=True)
     st.markdown('<div class="km-menu-sub">迷ったら、いちばん気になる項目を1つ選べばOKです。</div>', unsafe_allow_html=True)
-    st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
-    st.markdown("## 機能を選択")
-    st.markdown('<div class="km-muted">タップして開始します</div>', unsafe_allow_html=True)
-    st.write("")
 
-    # 2列グリッド、最後だけ1列
-    pairs = APP_PAGES[:-1]
-    last = APP_PAGES[-1]
+    # 2列レイアウト（スマホで縦積みになってもボタンは大きいまま）
+    pairs = list(APP_PAGES)
 
-    st.markdown('<div class="km-grid">', unsafe_allow_html=True)
     for i in range(0, len(pairs), 2):
         left = pairs[i]
-        right = pairs[i+1] if i+1 < len(pairs) else None
+        right = pairs[i + 1] if i + 1 < len(pairs) else None
+
         c1, c2 = st.columns(2, gap="small")
         with c1:
             st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
-    # --- FIX: removed empty if block ---
-    pass
-                _route_set(left[0]); st.rerun()
+            if st.button(left[1], key=f"menu_{left[0]}", use_container_width=True):
+                _route_set(left[0])
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
         with c2:
             if right:
                 st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
                 if st.button(right[1], key=f"menu_{right[0]}", use_container_width=True):
+                    _route_set(right[0])
+                    st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-                    _route_set(right[0]); st.rerun()
             else:
                 st.write("")
-    st.write("")
-    # last row: サッカー動画検索 + 個人情報
-    c1, c2 = st.columns(2, gap="small")
-    with c1:
-        st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
-        if st.button(last[1], key=f"menu_{last[0]}", use_container_width=True):
-        st.markdown('</div>', unsafe_allow_html=True)
-            _route_set(last[0]); st.rerun()
-    with c2:
-        st.markdown('<div class="km-bigbtn">', unsafe_allow_html=True)
-        if st.button("👤 個人情報", key="menu_profile_edit", use_container_width=True):
-        st.markdown('</div>', unsafe_allow_html=True)
-            _route_set("profile_edit"); st.rerun()
 
-    st.markdown('</div>', unsafe_allow_html=True)  # km-grid
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<div class="km-footer-note">※ グラフや詳細は、必要なときだけ開けばOKです。</div>', unsafe_allow_html=True)
 
 def injury_line_test_box():
     st.markdown("### 🧪（テスト）医師へ相談を送る")
