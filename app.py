@@ -718,6 +718,28 @@ def normalize_training_headings(text: str) -> str:
 
     return "\n".join(out)
 
+
+def strip_html_simple(s: str) -> str:
+    """Very small HTML stripper for saving text to logs (prevents <div> tags from appearing)."""
+    if not s:
+        return s
+    # common line breaks
+    s = s.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    # remove tags
+    s = re.sub(r"<[^>]+>", "", s)
+    # unescape entities
+    try:
+        import html as _html
+        s = _html.unescape(s)
+    except Exception:
+        pass
+    # normalize newlines
+    s = s.replace("\r\n", "\n")
+    return s.strip()
+
+
+
+
 def saved_ai_footer(items):
     """Footer area where saved comments are shown + copy buttons."""
     st.markdown("---")
@@ -2835,6 +2857,8 @@ def exercise_prescription_page(code_hash: str):
     days = st.selectbox("週あたりの筋トレ日数", [1,2,3,4], index=2, key="tr_days")
     focus = st.selectbox("筋トレの目的", ["バルクアップ", "スピード・跳躍", "怪我予防", "疲労回復を優先"], index=0, key="tr_menu_focus")
 
+    st.text_area("追加コメント（例：もう少しきつく／重量を重く／休憩を短く）", key="tr_menu_adjust", height=80)
+
     if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
         system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
         user = f"""競技: {sport}
@@ -2844,6 +2868,7 @@ def exercise_prescription_page(code_hash: str):
     器具: {equipment}
     週の筋トレ日数: {days}
     目的: {focus}
+    追加コメント: {st.session_state.get("tr_menu_adjust","")}
 
     要件:
     - 上半身/下半身/体幹に分ける
@@ -2857,9 +2882,17 @@ def exercise_prescription_page(code_hash: str):
         if err:
             st.error("AI提案に失敗: " + err)
         else:
-            st.session_state["tr_menu_text"] = normalize_training_headings(text)
-            text = normalize_training_headings(text)
-            ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", normalize_training_headings(text))
+            html_menu = normalize_training_headings(text)
+            plain_menu = strip_html_simple(html_menu)
+            st.session_state["tr_menu_text"] = plain_menu           # 保存用（HTMLなし）
+            st.session_state["tr_menu_text_html"] = html_menu       # 表示用（見出し装飾あり）
+            ai_highlight_box("🏋️ 筋トレメニュー（生成結果）", html_menu)
+
+            # きつくしたい場合の再生成（40代でも迷わない）
+            if st.button("このメニューをもう少しきつくして再生成", key="tr_menu_make_harder"):
+                st.session_state["tr_menu_adjust"] = (st.session_state.get("tr_menu_adjust","").strip() + "\n" +
+                    "全体的に少しきつくしてください。可能なら重量を上げ（目安：1RMの70〜85%）、回数やセットを微増し、休憩を短くしてください。フォームが崩れるなら無理しない注意も入れてください。").strip()
+                st.rerun()
 
 
     if st.button("トレーニングログを保存", key="tr_inputs_save"):
