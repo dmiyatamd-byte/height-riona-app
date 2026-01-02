@@ -949,6 +949,15 @@ def save_meal_day_snapshot(code_hash: str, d, payload: dict):
 def load_meal_day_snapshot(code_hash: str, d):
     return load_snapshot(code_hash, meal_snapshot_kind(d))
 
+def meal_draft_kind(d) -> str:
+    return f"meal_draft_{_meal_date_key(d)}"
+
+def save_meal_day_draft(code_hash: str, d, payload: dict):
+    save_snapshot(code_hash, meal_draft_kind(d), payload)
+
+def load_meal_day_draft(code_hash: str, d):
+    return load_snapshot(code_hash, meal_draft_kind(d))
+
 
 
 
@@ -2495,13 +2504,37 @@ def meal_page(code_hash: str):
 
     # ---- 今日の保存済み食事ログをセッションへ復元（ウィジェット生成前に行う）----
     snap_day = load_meal_day_snapshot(code_hash, meal_date)
-    if snap_day and not st.session_state.get("_meal_day_restored_once", False):
+    snap_draft = load_meal_day_draft(code_hash, meal_date) or None
+    # 下書き（途中保存）があれば優先して復元/表示
+    snap_base = snap_draft or snap_day
+    if snap_base and not st.session_state.get("_meal_day_restored_once", False):
         st.session_state["_meal_day_restored_once"] = True
         try:
-            if snap_day.get("meal_goal") is not None:
-                st.session_state["meal_goal"] = snap_day.get("meal_goal")
-            if snap_day.get("meal_weight") is not None:
-                st.session_state["meal_weight"] = snap_day.get("meal_weight")
+            if snap_base.get("meal_goal") is not None:
+                st.session_state["meal_goal"] = snap_base.get("meal_goal")
+            if snap_base.get("meal_weight") is not None:
+                st.session_state["meal_weight"] = snap_base.get("meal_weight")
+            # 各食事の推定結果やコメント（写真以外）を復元して、途中再開しやすくする
+            for pref in ["b", "l", "d"]:
+                info = snap_base.get(pref) or {}
+                if isinstance(info, dict):
+                    if info.get("est") is not None:
+                        st.session_state[f"{pref}_est"] = info.get("est")
+                    if info.get("ai") is not None:
+                        st.session_state[f"{pref}_ai"] = info.get("ai")
+                    if info.get("comment") is not None:
+                        st.session_state[f"{pref}_comment"] = info.get("comment")
+                    if "school" in info:
+                        st.session_state[f"{pref}_school"] = info.get("school")
+            # 量の補正（少/普/多）など
+            if isinstance(snap_base.get("levels"), dict):
+                lv = snap_base.get("levels") or {}
+                for pref in ["b","l","d"]:
+                    for k in ["sel_carb","sel_protein","sel_veg","sel_fat","sel_fried","sel_dairy","sel_fruit"]:
+                        kk = f"{pref}_{k}"
+                        if kk in lv:
+                            st.session_state[kk] = lv.get(kk)
+
         except Exception:
             pass
 
@@ -2510,11 +2543,13 @@ def meal_page(code_hash: str):
     targets = calc_daily_targets(w, goal)
 
     # ---- 今日の保存済み食事ログ（表示のみ：ログアウトしても残ります）----
-    if snap_day:
+    if snap_base:
         with st.expander("✅ 選択した日の保存済み食事ログ（ログアウトしても残ります）", expanded=False):
+            if snap_draft:
+                st.info("この日付には「途中保存」があります。続きから入力して、最後に『今日の食事ログを保存』を押してください。")
             st.write("※ 写真は復元しません（容量・安定性のため）。AI推定結果とコメント、合計は復元します。")
-            total_s = (snap_day.get("total") or {})
-            targets_s = (snap_day.get("targets") or {})
+            total_s = (snap_base.get("total") or {})
+            targets_s = (snap_base.get("targets") or {})
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("kcal", f"{float(total_s.get('kcal',0)):.0f}", delta=f"{(float(total_s.get('kcal',0))-float(targets_s.get('kcal',0))):+.0f}")
             c2.metric("タンパク質(g)", f"{float(total_s.get('p',0)):.0f}", delta=f"{(float(total_s.get('p',0))-float(targets_s.get('p',targets_s.get('p_g',0)))):+.0f}")
@@ -2523,7 +2558,7 @@ def meal_page(code_hash: str):
 
             # 各食事のAIコメント（保存済み）を表示
             for pref, title in [("b", "朝食"), ("l", "昼食"), ("d", "夕食")]:
-                info = (snap_day.get(pref) or {})
+                info = (snap_base.get(pref) or {})
                 if not isinstance(info, dict):
                     continue
                 ai_val = info.get("ai")
@@ -2620,56 +2655,86 @@ def meal_page(code_hash: str):
     c3.metric("炭水化物(g)", f"{total['c']:.0f}", delta=f"{(total['c'] - targets.get('c', targets.get('c_g', 0))):+.0f}")
     c4.metric("脂質(g)", f"{total['f']:.0f}", delta=f"{(total['f'] - targets.get('f', targets.get('f_g', 0))):+.0f}")
 
-    if st.button("今日の食事ログを保存", key="meal_save_simple"):
-        try:
-            save_record(code_hash, "meal_log", {"date": _meal_date_key(meal_date), "b": b, "l": l, "d": d, "total": total, "targets": targets}, {"summary": "meal_log"})
-            # 今日のログ（AI推定・コメント・合計）をスナップショットに保存（ログアウトしても復元可）
-            save_meal_day_snapshot(code_hash, meal_date, {
-                "date": _meal_date_key(meal_date),
-                "meal_goal": goal,
-                "meal_weight": float(st.session_state.get("meal_weight") or w),
-                "targets": targets,
-                "total": total,
-                "b": {
-                    "est": st.session_state.get("b_est"),
-                    "ai": st.session_state.get("b_ai"),
-                    "comment": st.session_state.get("b_comment"),
-                    "school": bool(st.session_state.get("b_school") or False),
-                },
-                "l": {
-                    "est": st.session_state.get("l_est"),
-                    "ai": st.session_state.get("l_ai"),
-                    "comment": st.session_state.get("l_comment"),
-                    "school": bool(st.session_state.get("l_school") or False),
-                },
-                "d": {
-                    "est": st.session_state.get("d_est"),
-                    "ai": st.session_state.get("d_ai"),
-                    "comment": st.session_state.get("d_comment"),
-                    "school": bool(st.session_state.get("d_school") or False),
-                },
-            })
-
-            # 旧来の簡易復元（フォーム用のフラットキー）も保存
-            save_snapshot(code_hash, "meal_draft", {
-                "meal_goal": goal,
-                "meal_weight": float(st.session_state.get("meal_weight") or w),
-                "meal_intensity": st.session_state.get("meal_intensity"),
-                "b_c": st.session_state.get("b_c"),
-                "b_p": st.session_state.get("b_p"),
-                "b_v": st.session_state.get("b_v"),
-                "l_c": st.session_state.get("l_c"),
-                "l_p": st.session_state.get("l_p"),
-                "l_v": st.session_state.get("l_v"),
-                "d_c": st.session_state.get("d_c"),
-                "d_p": st.session_state.get("d_p"),
-                "d_v": st.session_state.get("d_v"),
-            })
-
-            update_streak_on_save(code_hash)
-            st.success("保存しました。")
-        except Exception as e:
-            st.error(f"保存に失敗: {e}")(f"保存に失敗: {e}")
+    cA, cB = st.columns(2)
+    with cA:
+        if st.button("途中保存（後で続きから）", key="meal_save_draft"):
+            try:
+                levels = {}
+                for pref in ["b","l","d"]:
+                    for k in ["sel_carb","sel_protein","sel_veg","sel_fat","sel_fried","sel_dairy","sel_fruit"]:
+                        kk = f"{pref}_{k}"
+                        if kk in st.session_state:
+                            levels[kk] = st.session_state.get(kk)
+                save_meal_day_draft(code_hash, meal_date, {
+                    "date": _meal_date_key(meal_date),
+                    "meal_goal": goal,
+                    "meal_weight": float(st.session_state.get("meal_weight") or w),
+                    "targets": targets,
+                    "total": total,
+                    "levels": levels,
+                    "b": {"est": st.session_state.get("b_est"), "ai": st.session_state.get("b_ai"), "comment": st.session_state.get("b_comment"), "school": bool(st.session_state.get("b_school") or False)},
+                    "l": {"est": st.session_state.get("l_est"), "ai": st.session_state.get("l_ai"), "comment": st.session_state.get("l_comment"), "school": bool(st.session_state.get("l_school") or False)},
+                    "d": {"est": st.session_state.get("d_est"), "ai": st.session_state.get("d_ai"), "comment": st.session_state.get("d_comment"), "school": bool(st.session_state.get("d_school") or False)},
+                })
+                st.success("途中保存しました。この日付を開けば続きから再開できます。")
+                st.rerun()
+            except Exception as e:
+                st.error(f"途中保存に失敗: {e}")
+    with cB:
+        if st.button("今日の食事ログを保存", key="meal_save_simple"):
+            try:
+                save_record(code_hash, "meal_log", {"date": _meal_date_key(meal_date), "b": b, "l": l, "d": d, "total": total, "targets": targets}, {"summary": "meal_log"})
+                # 今日のログ（AI推定・コメント・合計）をスナップショットに保存（ログアウトしても復元可）
+                save_meal_day_snapshot(code_hash, meal_date, {
+                    "date": _meal_date_key(meal_date),
+                    "meal_goal": goal,
+                    "meal_weight": float(st.session_state.get("meal_weight") or w),
+                    "targets": targets,
+                    "total": total,
+                    "b": {
+                        "est": st.session_state.get("b_est"),
+                        "ai": st.session_state.get("b_ai"),
+                        "comment": st.session_state.get("b_comment"),
+                        "school": bool(st.session_state.get("b_school") or False),
+                    },
+                    "l": {
+                        "est": st.session_state.get("l_est"),
+                        "ai": st.session_state.get("l_ai"),
+                        "comment": st.session_state.get("l_comment"),
+                        "school": bool(st.session_state.get("l_school") or False),
+                    },
+                    "d": {
+                        "est": st.session_state.get("d_est"),
+                        "ai": st.session_state.get("d_ai"),
+                        "comment": st.session_state.get("d_comment"),
+                        "school": bool(st.session_state.get("d_school") or False),
+                    },
+                })
+    
+                # 旧来の簡易復元（フォーム用のフラットキー）も保存
+                save_snapshot(code_hash, "meal_draft", {
+                    "meal_goal": goal,
+                    "meal_weight": float(st.session_state.get("meal_weight") or w),
+                    "meal_intensity": st.session_state.get("meal_intensity"),
+                    "b_c": st.session_state.get("b_c"),
+                    "b_p": st.session_state.get("b_p"),
+                    "b_v": st.session_state.get("b_v"),
+                    "l_c": st.session_state.get("l_c"),
+                    "l_p": st.session_state.get("l_p"),
+                    "l_v": st.session_state.get("l_v"),
+                    "d_c": st.session_state.get("d_c"),
+                    "d_p": st.session_state.get("d_p"),
+                    "d_v": st.session_state.get("d_v"),
+                })
+    
+                update_streak_on_save(code_hash)
+                try:
+                    delete_snapshot(code_hash, meal_draft_kind(meal_date))
+                except Exception:
+                    pass
+                st.success("保存しました。")
+            except Exception as e:
+                st.error(f"保存に失敗: {e}")
 
 
 def exercise_prescription_page(code_hash: str):
