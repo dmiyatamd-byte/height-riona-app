@@ -927,22 +927,28 @@ def load_snapshot(code_hash: str, kind: str):
 
 
 # =====================
-# Meal (today) persistence helpers
+# Meal (by date) persistence helpers
 # =====================
-def _today_key_jst() -> str:
-    return now_jst().date().isoformat()
+def _meal_date_key(d) -> str:
+    """Return YYYY-MM-DD for a date or date-like."""
+    if isinstance(d, date):
+        return d.isoformat()
+    try:
+        # already string
+        return str(d)
+    except Exception:
+        return now_jst().date().isoformat()
 
-def save_meal_today_snapshot(code_hash: str, payload: dict):
+def meal_snapshot_kind(d) -> str:
+    return f"meal_day_{_meal_date_key(d)}"
+
+def save_meal_day_snapshot(code_hash: str, d, payload: dict):
     # payload should include "date" (YYYY-MM-DD)
-    save_snapshot(code_hash, "meal_today", payload)
+    save_snapshot(code_hash, meal_snapshot_kind(d), payload)
 
-def load_meal_today_snapshot(code_hash: str):
-    snap = load_snapshot(code_hash, "meal_today")
-    if not snap:
-        return None
-    if str(snap.get("date") or "") != _today_key_jst():
-        return None
-    return snap
+def load_meal_day_snapshot(code_hash: str, d):
+    return load_snapshot(code_hash, meal_snapshot_kind(d))
+
 
 
 
@@ -2461,18 +2467,29 @@ def meal_page(code_hash: str):
     st.subheader("🍽️ 食事管理（写真→AI解析）")
     st.caption("朝・昼・夕の写真をアップロードして、AIが内容を推測してフィードバックします（目安）。昼が給食の場合はチェックのみ。")
 
+    # 記録する日付（過去にさかのぼって入力できます）
+    st.session_state.setdefault("meal_date", now_jst().date())
+    meal_date = st.date_input("日付", value=st.session_state.get("meal_date"), key="meal_date")
+
+    # 日付を変えたら復元フラグをリセット
+    if st.session_state.get("_meal_last_date") != _meal_date_key(meal_date):
+        st.session_state["_meal_last_date"] = _meal_date_key(meal_date)
+        st.session_state["_meal_day_restored_once"] = False
+
+
+
     # 体重はプロフィールから初期値（ウィジェット作成前に同期済み）
     w = float(st.session_state.get("meal_weight") or st.session_state.get("profile_weight_kg") or 45.0)
 
     # ---- 今日の保存済み食事ログをセッションへ復元（ウィジェット生成前に行う）----
-    snap_today = load_meal_today_snapshot(code_hash)
-    if snap_today and not st.session_state.get("_meal_today_restored_once", False):
-        st.session_state["_meal_today_restored_once"] = True
+    snap_day = load_meal_day_snapshot(code_hash, meal_date)
+    if snap_day and not st.session_state.get("_meal_day_restored_once", False):
+        st.session_state["_meal_day_restored_once"] = True
         try:
-            if snap_today.get("meal_goal") is not None:
-                st.session_state["meal_goal"] = snap_today.get("meal_goal")
-            if snap_today.get("meal_weight") is not None:
-                st.session_state["meal_weight"] = snap_today.get("meal_weight")
+            if snap_day.get("meal_goal") is not None:
+                st.session_state["meal_goal"] = snap_day.get("meal_goal")
+            if snap_day.get("meal_weight") is not None:
+                st.session_state["meal_weight"] = snap_day.get("meal_weight")
         except Exception:
             pass
 
@@ -2481,11 +2498,11 @@ def meal_page(code_hash: str):
     targets = calc_daily_targets(w, goal)
 
     # ---- 今日の保存済み食事ログ（表示のみ：ログアウトしても残ります）----
-    if snap_today:
-        with st.expander("✅ 今日の保存済み食事ログ（ログアウトしても残ります）", expanded=False):
+    if snap_day:
+        with st.expander("✅ 選択した日の保存済み食事ログ（ログアウトしても残ります）", expanded=False):
             st.write("※ 写真は復元しません（容量・安定性のため）。AI推定結果とコメント、合計は復元します。")
-            total_s = (snap_today.get("total") or {})
-            targets_s = (snap_today.get("targets") or {})
+            total_s = (snap_day.get("total") or {})
+            targets_s = (snap_day.get("targets") or {})
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("kcal", f"{float(total_s.get('kcal',0)):.0f}", delta=f"{(float(total_s.get('kcal',0))-float(targets_s.get('kcal',0))):+.0f}")
             c2.metric("タンパク質(g)", f"{float(total_s.get('p',0)):.0f}", delta=f"{(float(total_s.get('p',0))-float(targets_s.get('p',targets_s.get('p_g',0)))):+.0f}")
@@ -2494,7 +2511,7 @@ def meal_page(code_hash: str):
 
             # 各食事のAIコメント（保存済み）を表示
             for pref, title in [("b", "朝食"), ("l", "昼食"), ("d", "夕食")]:
-                info = snap_today.get(pref) or {}
+                info = (snap_day.get(pref) or {})
                 if not isinstance(info, dict):
                     continue
                 ai_val = info.get("ai")
@@ -2593,10 +2610,10 @@ def meal_page(code_hash: str):
 
     if st.button("今日の食事ログを保存", key="meal_save_simple"):
         try:
-            save_record(code_hash, "meal_log", {"b": b, "l": l, "d": d, "total": total, "targets": targets}, {"summary": "meal_log"})
+            save_record(code_hash, "meal_log", {"date": _meal_date_key(meal_date), "b": b, "l": l, "d": d, "total": total, "targets": targets}, {"summary": "meal_log"})
             # 今日のログ（AI推定・コメント・合計）をスナップショットに保存（ログアウトしても復元可）
-            save_meal_today_snapshot(code_hash, {
-                "date": _today_key_jst(),
+            save_meal_day_snapshot(code_hash, meal_date, {
+                "date": _meal_date_key(meal_date),
                 "meal_goal": goal,
                 "meal_weight": float(st.session_state.get("meal_weight") or w),
                 "targets": targets,
