@@ -2471,10 +2471,22 @@ def meal_page(code_hash: str):
     st.session_state.setdefault("meal_date", now_jst().date())
     meal_date = st.date_input("日付", value=st.session_state.get("meal_date"), key="meal_date")
 
-    # 日付を変えたら復元フラグをリセット
+    # 日付を変えたら復元フラグをリセット（写真は新規にする）
     if st.session_state.get("_meal_last_date") != _meal_date_key(meal_date):
         st.session_state["_meal_last_date"] = _meal_date_key(meal_date)
         st.session_state["_meal_day_restored_once"] = False
+
+        # 写真は日付ごとに分ける：日付変更時は写真だけクリア（文章ログや目標は残す）
+        for pref in ["b", "l", "d"]:
+            # 追加済み写真ストア
+            st.session_state[f"{pref}_photos_store"] = []
+            # 選択中アップロード（file_uploader）の状態もリセット
+            st.session_state.pop(f"{pref}_photos", None)
+            # 重複検知/一時バッチ
+            st.session_state.pop(f"{pref}_last_batch_id", None)
+        # 表示用の拡大ボタン状態なども日付で持たない
+        st.session_state.pop("__copy_buffer", None)
+
 
 
 
