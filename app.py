@@ -3752,7 +3752,7 @@ def injury_line__box():
         st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
 
 def main():
-    st.set_page_config(page_title="ジュニアス", page_icon="assets/logo.png", layout="wide")
+    st.set_page_config(page_title="ジュニアス", page_icon="assets/favicon.png", layout="wide")
     premium_css()
     apply_css()
     init_users_db()
