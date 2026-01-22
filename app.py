@@ -861,7 +861,7 @@ def create_user(username: str, password: str) -> str | None:
     return None
 
 def login_panel() -> str | None:
-    st.markdown("## ログイン（テスト段階）")
+    st.markdown("## ログイン")
     t = st.tabs(["ログイン", "初回登録"])
     with t[0]:
         u = st.text_input("ID", key="login_id")
