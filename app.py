@@ -2150,6 +2150,8 @@ def meal_block(prefix: str, title: str, enable_photo: bool, targets: dict):
 
             # AIで初期値セット（写真から、少/普/多を推測）
             if st.button("AIで写真から初期値セット", key=f"{prefix}_ai_set_btn"):
+                if not require_premium_ai(code_hash):
+                    return st.session_state.get(est_key) or {"p":0.0,"c":0.0,"f":0.0,"kcal":0.0}
                 # 複数枚の結果をまとめて、少/普/多をざっくり推測
                 results = []
                 for b in img_list:
@@ -2993,6 +2995,8 @@ def exercise_prescription_page(code_hash: str):
     st.text_area("追加コメント（例：もう少しきつく／重量を重く／休憩を短く）", key="tr_menu_adjust", height=80)
 
     if st.button("AIでメニューを作る", type="primary", key="tr_ai"):
+        if not require_premium_ai(code_hash):
+            return
         system = "You are a strength & conditioning coach specializing in youth athletes. Output concise Japanese."
         user = f"""競技: {sport}
     体重: {w} kg
@@ -3045,20 +3049,132 @@ def exercise_prescription_page(code_hash: str):
     ])
 
 
+
+
+def coldflu_page(code_hash: str):
+    st.subheader("🤒 風邪・インフルエンザ相談（診断ではありません）")
+
+    if not is_premium(code_hash):
+        premium_gate(code_hash, "このページはプレミアムで利用できます。")
+        return
+
+    sport = st.session_state.get("sport", SPORTS[0])
+
+    st.caption("症状を整理して、クリニックへ相談するための文章を作ります。診断は行いません。")
+
+    st.markdown("### 症状の入力")
+    st.session_state.setdefault("cf_onset", now_jst().date())
+    onset = st.date_input("いつから？", value=st.session_state.get("cf_onset"), key="cf_onset")
+    temp_max = st.number_input("最高体温（℃）", min_value=34.0, max_value=43.0, value=float(st.session_state.get("cf_temp_max") or 37.5), step=0.1, key="cf_temp_max")
+    fever_days = st.selectbox("発熱の経過", ["上がってきた", "下がってきた", "横ばい", "発熱なし"], index=0, key="cf_fever_trend")
+
+    st.markdown("### 症状チェック")
+    cols = st.columns(2)
+    with cols[0]:
+        sore = st.checkbox("のど痛", key="cf_sore")
+        cough = st.checkbox("咳", key="cf_cough")
+        runny = st.checkbox("鼻水/鼻づまり", key="cf_runny")
+        headache = st.checkbox("頭痛", key="cf_headache")
+        chill = st.checkbox("悪寒", key="cf_chill")
+    with cols[1]:
+        fatigue = st.checkbox("強いだるさ", key="cf_fatigue")
+        muscle = st.checkbox("筋肉痛/関節痛", key="cf_muscle")
+        nausea = st.checkbox("吐き気/嘔吐", key="cf_nausea")
+        diarrhea = st.checkbox("下痢", key="cf_diarrhea")
+        appetite = st.checkbox("食欲低下", key="cf_appetite")
+
+    st.markdown("### 状況")
+    school_outbreak = st.checkbox("学校・チームで流行している", key="cf_outbreak")
+    family = st.checkbox("家族に発熱者がいる", key="cf_family")
+    breathing = st.checkbox("息が苦しい/呼吸がつらい", key="cf_breathing")
+    hydration = st.checkbox("水分が取れない", key="cf_hydration")
+    note = st.text_area("メモ（自由記載）", key="cf_note", height=90)
+
+    if st.button("AIで相談文を作る", type="primary", key="cf_ai"):
+        system = "You are a sports medicine clinician. Output Japanese. Do NOT diagnose. Avoid definitive statements. Be concise and structured."
+        user = f"""競技: {sport}
+発症: {onset}
+最高体温: {temp_max}℃
+発熱の経過: {fever_days}
+症状: のど痛={sore}, 咳={cough}, 鼻={runny}, 頭痛={headache}, 悪寒={chill}, だるさ={fatigue}, 筋肉痛/関節痛={muscle}, 吐き気/嘔吐={nausea}, 下痢={diarrhea}, 食欲低下={appetite}
+状況: 流行={school_outbreak}, 家族発熱={family}
+危険そうなサイン: 呼吸苦={breathing}, 水分不可={hydration}
+メモ: {note}
+
+要件:
+- 診断はしない（「〜の可能性」まで）
+- 形式は以下
+  1) まとめ（発症/発熱/主症状/周囲状況）
+  2) 考えやすい状態（診断ではない）
+  3) 自宅でできる対応
+  4) 相談を急いだ方がよいサイン（箇条書き）
+- “受診の目安”という言葉は使わない
+"""
+        text, err = ai_text(system, user)
+        if err:
+            st.error("AIに失敗: " + err)
+        else:
+            st.session_state["cf_ai_text"] = text
+            ai_highlight_box("🤒 相談文（保存されます）", text)
+
+            st.markdown("### 📲 公式LINEに貼る（プレミアム）")
+            st.text_area("LINE貼り付け用テキスト", text, height=220, key="cf_line_text")
+            clipboard_copy_button("LINEに貼る文章をコピー", text, key="cf_copy_line_btn")
+            if "LINE_OFFICIAL_URL" in globals() and LINE_OFFICIAL_URL:
+                st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
+
+    # 保存済み（コピーはここから）
+    saved_ai_footer([
+        {"key": "cf_ai_text", "title": "🤒 風邪/インフル：相談文"},
+    ])
+
+
 def injury_page(code_hash: str):
     st.subheader("🩹 怪我")
     sport = st.session_state.get("sport", SPORTS[0])
-    st.markdown("### 怪我のチェック")
-    st.caption("痛む場所を選ぶと質問が増えます。最後にAIがコメントします。")
 
-    cols = st.columns(3)
-    locs = []
-    loc_list = ["頭/首", "肩", "肘", "手首/手", "背中/腰", "股関節/鼠径部", "太もも", "ハムストリング", "膝", "ふくらはぎ", "足首", "踵/足底"]
-    for i, loc in enumerate(loc_list):
-        with cols[i % 3]:
-            if st.checkbox(loc, key=f"inj_loc_{loc}"):
-                locs.append(loc)
+    st.markdown("### 痛む場所を選んでください（頭 → 足先）")
+    st.caption("まずは主な痛みを1つ選びます。必要なら2つ目も追加できます。最後にAIが整形します。")
 
+    # 競技で多い部位（表示の補助）
+    sport_hint = {
+        "サッカー": "膝/足首/ハムストリング/股関節（鼠径部）/踵（足底）",
+        "バスケットボール": "足首/膝/踵（足底）",
+        "野球": "肩/肘/手首/腰",
+        "陸上": "ハムストリング/ふくらはぎ/足首",
+    }
+    for k, v in sport_hint.items():
+        if k in str(sport):
+            st.info(f"この競技で多い部位の例：{v}")
+            break
+
+    LOCS = [
+        "頭（顔）", "首",
+        "肩", "肘", "手首", "手指",
+        "胸/肋骨",
+        "背中", "腰",
+        "股関節/鼠径部",
+        "太もも前", "太もも後（ハムストリング）",
+        "膝",
+        "すね", "ふくらはぎ",
+        "足首",
+        "踵/足底",
+        "足（足背/足趾）",
+    ]
+
+    primary = st.selectbox("主な痛む場所", LOCS, index=0, key="inj_primary_loc")
+
+    add_second = st.checkbox("2つ目の場所もある", key="inj_add_second")
+    secondary = None
+    if add_second:
+        secondary = st.selectbox("2つ目の痛む場所", [x for x in LOCS if x != primary], index=0, key="inj_secondary_loc")
+
+    locs = [primary] + ([secondary] if secondary else [])
+
+    # ----------------------------
+    # 共通質問
+    # ----------------------------
+    st.markdown("### 共通の質問")
     pain = st.slider("痛み（0-10）", 0, 10, 0, key="inj_pain")
     st.caption("例：0=痛みなし / 2-3=違和感 / 4-5=動かすと痛い / 6-7=練習が難しい / 8-10=日常生活もつらい")
 
@@ -3067,29 +3183,97 @@ def injury_page(code_hash: str):
     bruise = st.checkbox("内出血がある", key="inj_bruise")
     numb = st.checkbox("しびれ・感覚の違和感がある", key="inj_numb")
     fever = st.checkbox("熱がある", key="inj_fever")
-    weight_bearing = st.selectbox("体重をかけられる？（足の痛みがある場合）", ["問題なし", "少し痛いが可能", "ほぼ無理"], index=0, key="inj_bearing")
+
+    # 下肢が含まれる場合だけ荷重を聞く
+    lower_limb = any(x in locs for x in ["股関節/鼠径部", "太もも前", "太もも後（ハムストリング）", "膝", "すね", "ふくらはぎ", "足首", "踵/足底", "足（足背/足趾）"])
+    weight_bearing = st.selectbox(
+        "体重をかけられる？（足の痛みがある場合）",
+        ["問題なし", "少し痛いが可能", "ほぼ無理"],
+        index=0,
+        key="inj_bearing"
+    ) if lower_limb else "（対象外）"
 
     extra = {}
-    if locs:
-        st.markdown("#### 追加の質問（選んだ場所に応じて）")
-        for loc in locs:
-            with st.expander(f"{loc} の追加質問", expanded=False):
-                if loc in ["膝", "足首", "股関節/鼠径部"]:
-                    extra[f"{loc}_giving_way"] = st.checkbox("踏ん張るとガクっとする/抜ける感じがある", key=f"inj_{loc}_give")
-                    extra[f"{loc}_locking"] = st.checkbox("引っかかる/動かしにくい感じがある", key=f"inj_{loc}_lock")
-                if loc in ["肩", "肘", "手首/手"]:
-                    extra[f"{loc}_throw"] = st.checkbox("投げる/打つ動作で強く痛む", key=f"inj_{loc}_throw")
-                    extra[f"{loc}_weak"] = st.checkbox("力が入りにくい", key=f"inj_{loc}_weak")
-                if loc in ["背中/腰"]:
-                    extra[f"{loc}_legpain"] = st.checkbox("脚の方に痛み/しびれが走る", key=f"inj_{loc}_rad")
 
-                if loc in ["ふくらはぎ"]:
-                    extra[f"{loc}_sudden_pop"] = st.checkbox("走った/蹴った瞬間に『ブチッ/ピキッ』とした感じがあった", key=f"inj_{loc}_pop")
-                    extra[f"{loc}_tightness"] = st.checkbox("つっぱる/攣りそうな感じが強い", key=f"inj_{loc}_tight")
-                    extra[f"{loc}_push_off_pain"] = st.checkbox("つま先立ち（蹴り出し）で痛い", key=f"inj_{loc}_push")
-                    extra[f"{loc}_walking_pain"] = st.checkbox("歩くだけでも痛い", key=f"inj_{loc}_walk")
-                    extra[f"{loc}_localized"] = st.selectbox("痛い場所の中心", ["中央", "内側", "外側", "アキレス腱寄り"], index=0, key=f"inj_{loc}_spot")
-                extra[f"{loc}_worse"] = st.selectbox("一番つらい動き", ["走る", "ジャンプ", "切り返し", "蹴る", "投げる", "日常動作"], index=0, key=f"inj_{loc}_worse")
+    # ----------------------------
+    # 部位別（よくあるスポーツ外傷を中心に）
+    # ----------------------------
+    st.markdown("### 追加の質問（選んだ場所に応じて）")
+    for loc in locs:
+        with st.expander(f"{loc} の追加質問", expanded=False):
+
+            # どの部位でも「一番つらい動き」は聞く
+            extra[f"{loc}_worse"] = st.selectbox(
+                "一番つらい動き",
+                ["特になし", "走る", "ジャンプ", "切り返し", "蹴る", "投げる", "日常動作"],
+                index=0,
+                key=f"inj_{loc}_worse"
+            )
+
+            # 肩・肘・手首・手指（投球/打撃）
+            if loc in ["肩", "肘", "手首", "手指"]:
+                extra[f"{loc}_throw"] = st.checkbox("投げる/打つ動作で強く痛む", key=f"inj_{loc}_throw")
+                extra[f"{loc}_weak"] = st.checkbox("力が入りにくい", key=f"inj_{loc}_weak")
+                extra[f"{loc}_night"] = st.checkbox("夜間痛がある/じっとしていても痛む", key=f"inj_{loc}_night")
+
+            # 背中・腰
+            if loc in ["背中", "腰"]:
+                extra[f"{loc}_legpain"] = st.checkbox("脚の方に痛み/しびれが走る", key=f"inj_{loc}_rad")
+                extra[f"{loc}_extend"] = st.checkbox("反ると痛い", key=f"inj_{loc}_extend")
+                extra[f"{loc}_flex"] = st.checkbox("前屈で痛い", key=f"inj_{loc}_flex")
+
+            # 股関節/鼠径部
+            if loc in ["股関節/鼠径部"]:
+                extra[f"{loc}_kick"] = st.checkbox("蹴る/切り返しで痛い", key=f"inj_{loc}_kick")
+                extra[f"{loc}_adduct"] = st.checkbox("内もも（内転筋）を押すと痛い", key=f"inj_{loc}_adduct")
+                extra[f"{loc}_limp"] = st.checkbox("走ると跛行（びっこ）になる", key=f"inj_{loc}_limp")
+
+            # 太もも前/ハム
+            if loc in ["太もも前", "太もも後（ハムストリング）"]:
+                extra[f"{loc}_sudden_pop"] = st.checkbox("走った/蹴った瞬間に『ブチッ/ピキッ』とした感じがあった", key=f"inj_{loc}_pop")
+                extra[f"{loc}_stretch_pain"] = st.checkbox("伸ばすと痛い", key=f"inj_{loc}_stretch")
+                extra[f"{loc}_contract_pain"] = st.checkbox("力を入れると痛い", key=f"inj_{loc}_contract")
+                extra[f"{loc}_walking_pain"] = st.checkbox("歩くだけでも痛い", key=f"inj_{loc}_walk")
+
+            # 膝
+            if loc in ["膝"]:
+                extra[f"{loc}_giving_way"] = st.checkbox("踏ん張るとガクっとする/抜ける感じがある", key=f"inj_{loc}_give")
+                extra[f"{loc}_locking"] = st.checkbox("引っかかる/動かしにくい感じがある", key=f"inj_{loc}_lock")
+                extra[f"{loc}_stairs"] = st.checkbox("階段で痛い", key=f"inj_{loc}_stairs")
+                extra[f"{loc}_swollen"] = st.checkbox("膝が水がたまった感じに腫れる", key=f"inj_{loc}_eff")
+
+            # すね
+            if loc in ["すね"]:
+                extra[f"{loc}_diffuse"] = st.checkbox("広い範囲がズーンと痛い（走ると増える）", key=f"inj_{loc}_diff")
+                extra[f"{loc}_point"] = st.checkbox("一点を押すと強く痛い", key=f"inj_{loc}_point")
+
+            # ふくらはぎ
+            if loc in ["ふくらはぎ"]:
+                extra[f"{loc}_tightness"] = st.checkbox("つっぱる/攣りそうな感じが強い", key=f"inj_{loc}_tight")
+                extra[f"{loc}_push_off_pain"] = st.checkbox("つま先立ち（蹴り出し）で痛い", key=f"inj_{loc}_push")
+                extra[f"{loc}_localized"] = st.selectbox("痛い場所の中心", ["中央", "内側", "外側", "アキレス腱寄り"], index=0, key=f"inj_{loc}_spot")
+
+            # 足首
+            if loc in ["足首"]:
+                extra[f"{loc}_twist_in"] = st.checkbox("内側にひねった（内返し）", key=f"inj_{loc}_inv")
+                extra[f"{loc}_twist_out"] = st.checkbox("外側にひねった（外返し）", key=f"inj_{loc}_ev")
+                extra[f"{loc}_bearing"] = st.selectbox("今の荷重", ["問題なし", "少し痛いが可能", "ほぼ無理"], index=0, key=f"inj_{loc}_bearing2")
+
+            # 踵/足底
+            if loc in ["踵/足底"]:
+                extra[f"{loc}_morning"] = st.checkbox("朝一歩目が特に痛い", key=f"inj_{loc}_am")
+                extra[f"{loc}_spike"] = st.checkbox("スパイク/靴で悪化する", key=f"inj_{loc}_shoe")
+
+            # 足（足背/足趾）
+            if loc in ["足（足背/足趾）"]:
+                extra[f"{loc}_toe"] = st.checkbox("足趾を動かすと痛い", key=f"inj_{loc}_toe")
+                extra[f"{loc}_swelling"] = st.checkbox("足の甲が腫れている", key=f"inj_{loc}_sw")
+
+            # 頭/首（赤旗）
+            if loc in ["頭（顔）", "首"]:
+                extra[f"{loc}_headache"] = st.checkbox("頭痛がある", key=f"inj_{loc}_hd")
+                extra[f"{loc}_nausea"] = st.checkbox("吐き気/嘔吐がある", key=f"inj_{loc}_nv")
+                extra[f"{loc}_dizzy"] = st.checkbox("めまい/ふらつきがある", key=f"inj_{loc}_dz")
 
     st.markdown("### 直ぐにできる対応")
     st.write("• **痛みの出る動きは行わない**（痛みが出ない範囲での活動に切り替える）")
@@ -3099,42 +3283,48 @@ def injury_page(code_hash: str):
     st.write("• 痛みが強い/腫れが増える/しびれ/体重をかけられない/熱がある時は、早めに相談が安心です。")
 
     if st.button("AIコメントを出す", type="primary", key="inj_ai"):
+        if not require_premium_ai(code_hash):
+            return
         system = "You are a sports medicine assistant for youth athletes. Output Japanese. Avoid the phrase '受診の目安'. Be kind and clear."
         user = f"""競技: {sport}
-    痛い場所: {", ".join(locs) if locs else "未選択"}
-    痛みスケール(0-10): {pain}
-    きっかけ: {onset}
-    腫れ: {swelling}
-    内出血: {bruise}
-    しびれ: {numb}
-    熱: {fever}
-    荷重: {weight_bearing}
-    追加情報: {json.dumps(extra, ensure_ascii=False)}
+痛い場所: {", ".join(locs) if locs else "未選択"}
+痛みスケール(0-10): {pain}
+きっかけ: {onset}
+腫れ: {swelling}
+内出血: {bruise}
+しびれ: {numb}
+熱: {fever}
+荷重: {weight_bearing}
+追加情報: {json.dumps(extra, ensure_ascii=False)}
 
-    お願い:
-    - 整形外科医に伝わるように、以下の形式で出力
-      1) まとめ（部位/発症様式/痛みの強さ/腫れ・内出血・しびれ・荷重/悪化動作）
-      2) 考えやすい鑑別（3〜5個、可能性の理由を短く）
-      3) 直ぐにできる対応（冷やし方/固定/痛くない範囲での代替運動）
-      4) 相談を急いだ方がよいサイン（箇条書き）
-    - “受診の目安”という言葉は使わない
-    - 文章は短め、箇条書き中心
-    """
+お願い:
+- 整形外科医に伝わるように、以下の形式で出力
+  1) まとめ（部位/発症様式/痛みの強さ/腫れ・内出血・しびれ・荷重/悪化動作）
+  2) 考えやすい鑑別（3〜5個、可能性の理由を短く）
+  3) 直ぐにできる対応（冷やし方/固定/痛くない範囲での代替運動）
+  4) 相談を急いだ方がよいサイン（箇条書き）
+- “受診の目安”という言葉は使わない
+- 文章は短め、箇条書き中心
+"""
         text, err = ai_text(system, user)
         if err:
             st.error("AIコメントに失敗: " + err)
         else:
             st.session_state["inj_ai_text"] = text
             ai_highlight_box("🩹 怪我AIコメント（保存されます）", text)
-            st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
-            # --- 公式LINE貼り付け用（40代でも迷わない） ---
-            st.markdown("### 📲 公式LINEに貼る（このまま使えます）")
-            st.caption("下の文章をコピーして、公式LINEのトークに貼り付けてください。")
-            st.text_area("LINE貼り付け用テキスト", text, height=220, key="inj_line_text")
-            clipboard_copy_button("LINEに貼る文章をコピー", text, key="inj_copy_line_btn")
-            if "LINE_OFFICIAL_URL" in globals():
-                st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
+            if is_premium(code_hash):
+                st.markdown("### 📲 公式LINEに貼る（プレミアム）")
+                st.caption("下の文章をコピーして、公式LINEのトークに貼り付けてください。")
+                st.text_area("LINE貼り付け用テキスト", text, height=220, key="inj_line_text")
+                clipboard_copy_button("LINEに貼る文章をコピー", text, key="inj_copy_line_btn")
+                if "LINE_OFFICIAL_URL" in globals() and LINE_OFFICIAL_URL:
+                    st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
+
+            else:
+                st.info("公式LINE連動（コピー＆起動）はプレミアムで利用できます。")
+
+            st.caption("※コピーやTXT保存は、ページ最下部の『保存したAIコメント』から行えます。")
 
     if st.button("怪我ログを保存", key="inj_save"):
         save_record(code_hash, "injury_log",
@@ -3144,11 +3334,7 @@ def injury_page(code_hash: str):
                     {"summary": "injury_log"})
         st.success("保存しました。")
 
-        # -----------------
-        # 睡眠
-        # -----------------
     jams_logo_footer()
-    # --- 保存済みAIコメント（コピーはここから） ---
     saved_ai_footer([
         {"key": "inj_ai_text", "title": "🩹 怪我：AIコメント"},
     ])
@@ -3218,6 +3404,8 @@ def sleep_page(code_hash: str):
 
     # --- AIアドバイス ---
     if st.button("AIで睡眠アドバイスを作る", key="sl_ai_make"):
+        if not require_premium_ai(code_hash):
+            return
         system = (
             "You are a sports medicine clinician and youth athlete performance coach. "
             "Give practical, safe, and kind sleep advice in Japanese. "
@@ -3312,6 +3500,7 @@ APP_PAGES = [
     ("height", "📏 身長予測"),
     ("anemia", "🩸 スポーツ貧血"),
     ("injury", "🩹 怪我の相談"),
+    ("coldflu", "🤒 風邪・インフル相談（プレミアム）"),
     ("sleep", "😴 睡眠の質"),
     ("soccer", "🎥 サッカー動画検索"),
     ("profile", "👤 個人情報"),
@@ -3336,6 +3525,36 @@ def _nav_button_to_menu(position: str = "top"):
     if st.button("⬅️ 機能選択へ戻る", key=f"to_menu_{position}", use_container_width=True):
         _nav_to_menu()
     st.markdown("</div>", unsafe_allow_html=True)
+
+
+# =====================
+# Plan (basic / premium)
+# =====================
+def get_plan(code_hash: str) -> str:
+    d = load_snapshot(code_hash, "plan") or {}
+    tier = (d.get("tier") or "basic").strip().lower()
+    return "premium" if tier == "premium" else "basic"
+
+def set_plan(code_hash: str, tier: str):
+    tier = (tier or "basic").strip().lower()
+    if tier not in ("basic", "premium"):
+        tier = "basic"
+    save_snapshot(code_hash, "plan", {"tier": tier, "updated_at": iso(now_jst())})
+
+def is_premium(code_hash: str) -> bool:
+    return get_plan(code_hash) == "premium"
+
+def premium_gate(code_hash: str, label: str = "この機能はプレミアムで利用できます"):
+    st.info(label)
+    st.caption("プレミアムにすると、AIアドバイス・風邪/インフル相談・公式LINE連動が使えます。")
+
+def require_premium_ai(code_hash: str) -> bool:
+    """Return True if premium, else show notice and return False."""
+    if is_premium(code_hash):
+        return True
+    premium_gate(code_hash, "AIアドバイス機能はプレミアムで利用できます。")
+    return False
+
 
 def _load_profile(code_hash: str) -> dict:
     d = load_snapshot(code_hash, "profile") or {}
@@ -3435,6 +3654,15 @@ def profile_top_page(code_hash: str):
         height_cm = st.number_input("身長（cm）", min_value=50.0, max_value=230.0, value=_h0, step=0.1, key="pf_height")
         weight_kg = st.number_input("体重（kg）", min_value=10.0, max_value=200.0, value=_w0, step=0.1, key="pf_weight")
 
+        # プラン（販売版ではStripe連動に置き換え）
+        tier = get_plan(code_hash)
+        tier_label = "プレミアム" if tier=="premium" else "ベーシック"
+        sel = st.radio("プラン", ["ベーシック", "プレミアム"], index=1 if tier=="premium" else 0, horizontal=True, key="pf_plan")
+        if sel == "プレミアム":
+            set_plan(code_hash, "premium")
+        else:
+            set_plan(code_hash, "basic")
+
         st.markdown('<div class="km-muted">※入力後は自動保存され、リセットしない限りこの情報で進みます。</div>', unsafe_allow_html=True)
 
         # 自動保存（毎回）
@@ -3464,13 +3692,13 @@ def profile_top_page(code_hash: str):
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-def menu_select_page():
+def menu_select_page(code_hash: str):
     # 40代の親が迷わず押せる：大きい2列ボタン（スマホ最適）
     st.markdown('<div class="km-menu-title">やりたいことを選んでください</div>', unsafe_allow_html=True)
     st.markdown('<div class="km-menu-sub">迷ったら、いちばん気になる項目を1つ選べばOKです。</div>', unsafe_allow_html=True)
 
     # 2列レイアウト（スマホで縦積みになってもボタンは大きいまま）
-    pairs = list(APP_PAGES)
+    pairs = [p for p in list(APP_PAGES) if (p[0] != "coldflu" or is_premium(code_hash))]
 
     for i in range(0, len(pairs), 2):
         left = pairs[i]
@@ -3555,7 +3783,7 @@ def main():
         return
 
     if r == "menu":
-        menu_select_page()
+        menu_select_page(code_hash)
         return
 
     # 3ページ目以降：必ずトップ/ボトムに「機能選択へ戻る」
@@ -3571,13 +3799,15 @@ def main():
         anemia_page(code_hash)
     elif r == "injury":
         injury_page(code_hash)
+    elif r == "coldflu":
+        coldflu_page(code_hash)
         injury_line_test_box()
     elif r == "sleep":
         sleep_page(code_hash)
     elif r == "soccer":
         soccer_video_page(code_hash)
     else:
-        menu_select_page()
+        menu_select_page(code_hash)
         return
 
     st.markdown('<div class="km-bottom">', unsafe_allow_html=True)
