@@ -3,6 +3,8 @@ import os
 import sqlite3
 import hashlib
 import secrets
+import threading
+import time
 import json
 import re
 import base64
@@ -871,14 +873,39 @@ def login_panel() -> str | None:
                     st.success("登録しました。ログインしてください。")
     return st.session_state.get("user")
 
+
+DB_LOCK = threading.Lock()
+
+def _connect_db():
+    # Streamlit Cloud: concurrent reruns can hit sqlite locks. Use timeout + busy_timeout + WAL.
+    conn = sqlite3.connect(DATA_DB_PATH, check_same_thread=False, timeout=30)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    return conn
+
 # =========================
 # Data DB
 # =========================
 def data_db():
-    conn = sqlite3.connect(DATA_DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    return conn
+    return _connect_db()
+def _with_db_retry(fn, *, attempts: int = 3, sleep_s: float = 0.15):
+    last = None
+    for i in range(attempts):
+        try:
+            with DB_LOCK:
+                return fn()
+        except sqlite3.OperationalError as e:
+            last = e
+            msg = str(e).lower()
+            if "locked" in msg or "busy" in msg:
+                time.sleep(sleep_s * (i + 1))
+                continue
+            raise
+    if last:
+        raise last
+
+
 
 def init_data_db():
     conn = data_db()
@@ -904,14 +931,18 @@ def init_data_db():
     conn.close()
 
 def save_snapshot(code_hash: str, kind: str, payload: dict):
-    conn = data_db()
-    conn.execute(
-        "INSERT INTO snapshots(code_hash, kind, updated_at, payload_json) VALUES(?,?,?,?) "
-        "ON CONFLICT(code_hash, kind) DO UPDATE SET updated_at=excluded.updated_at, payload_json=excluded.payload_json",
-        (code_hash, kind, iso(now_jst()), json.dumps(payload, ensure_ascii=False, default=str))
-    )
-    conn.commit()
-    conn.close()
+    def _op():
+        conn = data_db()
+        try:
+            conn.execute(
+                "INSERT INTO snapshots(code_hash, kind, updated_at, payload_json) VALUES(?,?,?,?) "
+                "ON CONFLICT(code_hash, kind) DO UPDATE SET updated_at=excluded.updated_at, payload_json=excluded.payload_json",
+                (code_hash, kind, iso(now_jst()), json.dumps(payload, ensure_ascii=False, default=str))
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return _with_db_retry(_op)
 
 def load_snapshot(code_hash: str, kind: str):
     conn = data_db()
@@ -1044,15 +1075,19 @@ def _weight_on_change(code_hash: str, key: str, *, write_back_profile: bool = Tr
 
 
 def save_record(code_hash: str, kind: str, payload: dict, result: dict):
-    conn = data_db()
-    conn.execute(
-        "INSERT INTO records(created_at, code_hash, kind, payload_json, result_json) VALUES(?,?,?,?,?)",
-        (iso(now_jst()), code_hash, kind,
-         json.dumps(payload, ensure_ascii=False, default=str),
-         json.dumps(result, ensure_ascii=False, default=str))
-    )
-    conn.commit()
-    conn.close()
+    def _op():
+        conn = data_db()
+        try:
+            conn.execute(
+                "INSERT INTO records(created_at, code_hash, kind, payload_json, result_json) VALUES(?,?,?,?,?)",
+                (iso(now_jst()), code_hash, kind,
+                 json.dumps(payload, ensure_ascii=False, default=str),
+                 json.dumps(result, ensure_ascii=False, default=str))
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return _with_db_retry(_op)
 
 def load_records(code_hash: str, limit: int = 200):
     conn = data_db()
@@ -1077,11 +1112,15 @@ def load_records(code_hash: str, limit: int = 200):
 
 
 def delete_snapshot(code_hash: str, kind: str) -> None:
-    conn = sqlite3.connect(DATA_DB_PATH)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM snapshots WHERE code_hash=? AND kind=?", (code_hash, kind))
-    conn.commit()
-    conn.close()
+    def _op():
+        conn = data_db()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM snapshots WHERE code_hash=? AND kind=?", (code_hash, kind))
+            conn.commit()
+        finally:
+            conn.close()
+    _with_db_retry(_op)
 
 def delete_record_by_id(record_id: int) -> None:
     conn = sqlite3.connect(DATA_DB_PATH)
