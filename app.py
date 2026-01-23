@@ -1020,8 +1020,8 @@ def list_meal_saved_dates(code_hash: str, limit: int = 400):
             pass
     return sorted(set(out))
 
-def render_month_calendar(title: str, month_anchor: date, marked_dates: set[str]):
-    """Simple month calendar with check marks for marked_dates (YYYY-MM-DD)."""
+def render_month_calendar(title: str, month_anchor: date, marked_dates: set[str], key_prefix: str = "cal") -> str | None:
+    """Clickable month calendar. Returns clicked date (YYYY-MM-DD) or None."""
     import calendar as _cal
     cal = _cal.Calendar(firstweekday=0)  # Monday
     year = month_anchor.year
@@ -1029,19 +1029,28 @@ def render_month_calendar(title: str, month_anchor: date, marked_dates: set[str]
     weeks = cal.monthdatescalendar(year, month)
 
     st.markdown(f"#### {title}（{year}-{month:02d}）")
-    header = ["月","火","水","木","金","土","日"]
-    md = "| " + " | ".join(header) + " |\n"
-    md += "| " + " | ".join(["---"]*7) + " |\n"
-    for w in weeks:
-        row = []
-        for d in w:
+    # header
+    header_cols = st.columns(7)
+    for i, h in enumerate(["月","火","水","木","金","土","日"]):
+        header_cols[i].markdown(f"<div style='text-align:center;font-weight:800;opacity:0.8'>{h}</div>", unsafe_allow_html=True)
+
+    clicked = None
+    for w_i, w in enumerate(weeks):
+        cols = st.columns(7)
+        for d_i, d in enumerate(w):
             if d.month != month:
-                row.append(" ")
-            else:
-                key = d.isoformat()
-                row.append("✅" if key in marked_dates else "・")
-        md += "| " + " | ".join(row) + " |\n"
-    st.markdown(md)
+                cols[d_i].markdown("<div style='height:44px'></div>", unsafe_allow_html=True)
+                continue
+
+            ds = d.isoformat()
+            mark = "✅" if ds in marked_dates else ""
+            label = f"{d.day}{mark}"
+
+            if cols[d_i].button(label, key=f"{key_prefix}_{year}{month:02d}_{w_i}_{d_i}", use_container_width=True):
+                clicked = ds
+
+    return clicked
+
 
 def list_training_dates(code_hash: str, limit: int = 500):
     """Return sorted unique training dates (YYYY-MM-DD) from records(kind='training_log')."""
@@ -2614,7 +2623,11 @@ def meal_page(code_hash: str):
 
     # 記録状況（その月に“ちゃんとできている日”が一目で分かる）
     saved_dates = set(list_meal_saved_dates(code_hash))
-    render_month_calendar("食事ログ（記録済みの日）", meal_date if isinstance(meal_date, date) else now_jst().date(), saved_dates)
+    clicked = render_month_calendar("食事ログ（記録済みの日）", meal_date if isinstance(meal_date, date) else now_jst().date(), saved_dates, key_prefix="meal_cal")
+    if clicked:
+        st.session_state["meal_date"] = date.fromisoformat(clicked)
+        st.session_state["_meal_day_restored_once"] = False
+        st.rerun()
     if _meal_date_key(meal_date) in saved_dates:
         st.success("この日付には『食事ログ（確定）』が保存されています。続きがあれば追加して、再度保存できます。")
     else:
@@ -2889,7 +2902,16 @@ def exercise_prescription_page(code_hash: str):
         st.session_state.setdefault("tr_view_month", now_jst().date())
         with st.expander("📅 過去ログへ戻る（カレンダー）", expanded=False):
             month_anchor = st.date_input("表示する月（任意）", value=st.session_state.get("tr_view_month"), key="tr_view_month")
-            render_month_calendar("運動ログ（記録済みの日）", month_anchor, tr_dates)
+            clicked_tr = render_month_calendar("運動ログ（記録済みの日）", month_anchor, tr_dates, key_prefix="tr_cal")
+            if clicked_tr:
+                pick2 = date.fromisoformat(clicked_tr)
+                ok2 = load_training_by_date(code_hash, pick2)
+                if ok2:
+                    st.success("読み込みました。下のフォームに反映されています。")
+                    st.session_state["tr_pick_date"] = pick2
+                    st.rerun()
+                else:
+                    st.info("その日付の保存ログが見つかりませんでした。")
             st.session_state.setdefault("tr_pick_date", now_jst().date())
             pick = st.date_input("読み込みたい日付", value=st.session_state.get("tr_pick_date"), key="tr_pick_date")
             if st.button("この日付の運動ログを読み込む", key="tr_load_by_date", use_container_width=True):
