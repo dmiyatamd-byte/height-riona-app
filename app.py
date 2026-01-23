@@ -17,24 +17,10 @@ import numpy as np
 import calendar
 import altair as alt
 
-# =========================
-# Branding
-# =========================
-def render_brand_header():
-    try:
-        cols = st.columns([1, 4])
-        with cols[0]:
-            st.image("assets/logo.png", width=72)
-        with cols[1]:
-            st.markdown('<div style="font-size:28px;font-weight:800;line-height:1.1;">ジュニアス</div>', unsafe_allow_html=True)
-            st.markdown('<div style="color:rgba(0,0,0,0.55);font-size:14px;margin-top:2px;">ジュニアアスリートの成長とコンディションを支えるメディカルサポート</div>', unsafe_allow_html=True)
-    except Exception:
-        st.markdown("## ジュニアス")
-
 from core import init_db, Labs, Ctx, register_case, add_followup, resolve_case_id, simulate_predictions_for_case
 
 # =========================
-# APIキー（Streamlit Secrets推奨）
+# テスト用（後でSecretsへ移行）
 # =========================
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
@@ -272,9 +258,9 @@ def apply_css():
       }
     
       .block-container { padding-top: 2.2rem; }
-      div[data-id="stHorizontalBlock"] { gap: 6px !important; padding: 0 4px; }
-div[data-id="stHorizontalBlock"]::after{ content:""; display:block; height:1px; background: rgba(0,0,0,0.10); margin-top:-1px; }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]{
+      div[data-testid="stHorizontalBlock"] { gap: 6px !important; padding: 0 4px; }
+div[data-testid="stHorizontalBlock"]::after{ content:""; display:block; height:1px; background: rgba(0,0,0,0.10); margin-top:-1px; }
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]{
   border: 1px solid rgba(0,0,0,0.10);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
@@ -282,14 +268,14 @@ div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]{
   background: rgba(255,255,255,0.85);
   box-shadow: 0 6px 14px rgba(0,0,0,0.06);
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:has(input:checked){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:has(input:checked){
   background: #ffffff;
   box-shadow: 0 10px 22px rgba(0,0,0,0.08);
   transform: translateY(1px);
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"] p{ margin:0; font-weight:700; }
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"] p{ margin:0; font-weight:700; }
 
-      div[data-id="column"] button{ width: 100%; }
+      div[data-testid="column"] button{ width: 100%; }
       .stExpander{
         border-radius: 16px;
         border: 1px solid rgba(0,0,0,0.07);
@@ -297,31 +283,31 @@ div[data-id="stHorizontalBlock"] label[data-baseweb="radio"] p{ margin:0; font-w
         background: rgba(255,255,255,0.92);
       }
     
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(1){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(1){
   border-left: 4px solid rgba(59,130,246,0.8) !important;
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(2){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(2){
   border-left: 4px solid rgba(239,68,68,0.8) !important;
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(3){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(3){
   border-left: 4px solid rgba(16,185,129,0.8) !important;
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(4){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:nth-child(4){
   border-left: 4px solid rgba(245,158,11,0.85) !important;
 }
 
 /* ===== Premium mobile nav ===== */
 @media (max-width: 640px){
   .block-container { padding-left: 0.75rem; padding-right: 0.75rem; }
-  div[data-id="stHorizontalBlock"] { gap: 8px !important; }
-  div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]{
+  div[data-testid="stHorizontalBlock"] { gap: 8px !important; }
+  div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]{
     padding: 10px 14px !important;
     border-radius: 14px !important;
     font-size: 16px !important;
   }
 }
 /* Make nav look like premium segmented tabs */
-div[data-id="stHorizontalBlock"]{
+div[data-testid="stHorizontalBlock"]{
   background: rgba(255,255,255,0.75);
   border: 1px solid rgba(0,0,0,0.08);
   border-radius: 16px;
@@ -332,9 +318,9 @@ div[data-id="stHorizontalBlock"]{
   z-index: 999;
   backdrop-filter: blur(10px);
 }
-div[data-id="stHorizontalBlock"]::after{ display:none !important; }
+div[data-testid="stHorizontalBlock"]::after{ display:none !important; }
 
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]{
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]{
   border: 0 !important;
   border-radius: 14px !important;
   padding: 9px 14px !important;
@@ -342,54 +328,54 @@ div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]{
   box-shadow: none !important;
   transition: all 120ms ease;
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"]:has(input:checked){
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"]:has(input:checked){
   background: #111827 !important;
   color: #fff !important;
   box-shadow: 0 10px 20px rgba(0,0,0,0.12) !important;
   transform: none !important;
 }
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"] p{ font-weight: 800; }
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"] p{ font-weight: 800; }
 
 /* Color accents per tab label (unselected) */
-div[data-id="stHorizontalBlock"] label[data-baseweb="radio"] p:contains("身長"){ }
+div[data-testid="stHorizontalBlock"] label[data-baseweb="radio"] p:contains("身長"){ }
 
 
 /* ===== Main nav (radio) premium ===== */
-div[data-id="stRadio"] div[role="radiogroup"]{
+div[data-testid="stRadio"] div[role="radiogroup"]{
   background: rgba(255,255,255,0.75);
   border: 1px solid rgba(0,0,0,0.10);
   border-radius: 16px;
   padding: 8px;
   box-shadow: 0 14px 30px rgba(0,0,0,0.06);
 }
-div[data-id="stRadio"] label[data-baseweb="radio"]{
+div[data-testid="stRadio"] label[data-baseweb="radio"]{
   border-radius: 14px !important;
   padding: 10px 14px !important;
   background: rgba(0,0,0,0.04) !important;
   border-left: 4px solid rgba(0,0,0,0.0) !important;
 }
-div[data-id="stRadio"] label[data-baseweb="radio"]:has(input:checked){
+div[data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked){
   background: rgba(255,255,255,0.98) !important;
   color: #111827 !important;
   box-shadow: 0 12px 26px rgba(0,0,0,0.12) !important;
   outline: 2px solid rgba(17,24,39,0.20);
 }
 
-div[data-id="stRadio"] label[data-baseweb="radio"] p{ margin:0; font-weight:800; }
+div[data-testid="stRadio"] label[data-baseweb="radio"] p{ margin:0; font-weight:800; }
 @media (max-width: 640px){
-  div[data-id="stRadio"] label[data-baseweb="radio"]{ font-size: 16px !important; }
+  div[data-testid="stRadio"] label[data-baseweb="radio"]{ font-size: 16px !important; }
 }
 
 
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(1){ border-left:4px solid rgba(59,130,246,0.85) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(2){ border-left:4px solid rgba(239,68,68,0.85) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(3){ border-left:4px solid rgba(16,185,129,0.85) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(4){ border-left:4px solid rgba(245,158,11,0.90) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(1){ border-left:4px solid rgba(59,130,246,0.85) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(2){ border-left:4px solid rgba(239,68,68,0.85) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(3){ border-left:4px solid rgba(16,185,129,0.85) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4){ border-left:4px solid rgba(245,158,11,0.90) !important; }
 
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(1):has(input:checked){ background: rgba(59,130,246,0.10) !important; outline-color: rgba(59,130,246,0.35) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(2):has(input:checked){ background: rgba(239,68,68,0.10) !important; outline-color: rgba(239,68,68,0.35) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(3):has(input:checked){ background: rgba(16,185,129,0.10) !important; outline-color: rgba(16,185,129,0.35) !important; }
-div[data-id="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:checked){ background: rgba(245,158,11,0.12) !important; outline-color: rgba(245,158,11,0.40) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(1):has(input:checked){ background: rgba(59,130,246,0.10) !important; outline-color: rgba(59,130,246,0.35) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(2):has(input:checked){ background: rgba(239,68,68,0.10) !important; outline-color: rgba(239,68,68,0.35) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(3):has(input:checked){ background: rgba(16,185,129,0.10) !important; outline-color: rgba(16,185,129,0.35) !important; }
+div[data-testid="stRadio"] label[data-baseweb="radio"]:nth-child(4):has(input:checked){ background: rgba(245,158,11,0.12) !important; outline-color: rgba(245,158,11,0.40) !important; }
 
 
 /* === Mobile menu (Calomil-ish) === */
@@ -809,7 +795,7 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 # =========================
-# Login ()
+# Login (test)
 # =========================
 def users_db():
     conn = sqlite3.connect(USERS_DB_PATH, check_same_thread=False)
@@ -861,7 +847,7 @@ def create_user(username: str, password: str) -> str | None:
     return None
 
 def login_panel() -> str | None:
-    st.markdown("## ログイン")
+    st.markdown("## ログイン（テスト段階）")
     t = st.tabs(["ログイン", "初回登録"])
     with t[0]:
         u = st.text_input("ID", key="login_id")
@@ -1007,6 +993,97 @@ def load_meal_day_draft(code_hash: str, d):
 
 
 
+
+# =====================
+# Log navigation helpers (meal / training)
+# =====================
+def list_snapshot_kinds(code_hash: str, kind_prefix: str, limit: int = 500):
+    """Return list of snapshot kind strings for a user filtered by prefix."""
+    conn = data_db()
+    rows = conn.execute(
+        "SELECT kind FROM snapshots WHERE code_hash=? AND kind LIKE ? ORDER BY updated_at DESC LIMIT ?",
+        (code_hash, f"{kind_prefix}%", limit)
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows] if rows else []
+
+def list_meal_saved_dates(code_hash: str, limit: int = 400):
+    # kinds are meal_day_YYYY-MM-DD
+    kinds = list_snapshot_kinds(code_hash, "meal_day_", limit=limit)
+    out = []
+    for k in kinds:
+        try:
+            d = k.replace("meal_day_", "")
+            date.fromisoformat(d)
+            out.append(d)
+        except Exception:
+            pass
+    return sorted(set(out))
+
+def render_month_calendar(title: str, month_anchor: date, marked_dates: set[str]):
+    """Simple month calendar with check marks for marked_dates (YYYY-MM-DD)."""
+    import calendar as _cal
+    cal = _cal.Calendar(firstweekday=0)  # Monday
+    year = month_anchor.year
+    month = month_anchor.month
+    weeks = cal.monthdatescalendar(year, month)
+
+    st.markdown(f"#### {title}（{year}-{month:02d}）")
+    header = ["月","火","水","木","金","土","日"]
+    md = "| " + " | ".join(header) + " |\n"
+    md += "| " + " | ".join(["---"]*7) + " |\n"
+    for w in weeks:
+        row = []
+        for d in w:
+            if d.month != month:
+                row.append(" ")
+            else:
+                key = d.isoformat()
+                row.append("✅" if key in marked_dates else "・")
+        md += "| " + " | ".join(row) + " |\n"
+    st.markdown(md)
+
+def list_training_dates(code_hash: str, limit: int = 500):
+    """Return sorted unique training dates (YYYY-MM-DD) from records(kind='training_log')."""
+    rows = load_records(code_hash, limit=limit)
+    out = []
+    for r in rows:
+        if r.get("kind") != "training_log":
+            continue
+        pl = r.get("payload") or {}
+        d = pl.get("tr_date")
+        if isinstance(d, str) and len(d) >= 10:
+            d = d[:10]
+        try:
+            if d:
+                date.fromisoformat(d)
+                out.append(d)
+        except Exception:
+            pass
+    return sorted(set(out))
+
+def load_training_by_date(code_hash: str, target_date: date):
+    """Load a training_log record for a given date into session_state. Returns True if found."""
+    target = target_date.isoformat()
+    rows = load_records(code_hash, limit=800)
+    for r in rows:
+        if r.get("kind") != "training_log":
+            continue
+        pl = r.get("payload") or {}
+        d = pl.get("tr_date")
+        if isinstance(d, str) and len(d) >= 10:
+            d = d[:10]
+        if d == target:
+            for k in TRAINING_KEYS:
+                if k in pl:
+                    st.session_state[k] = pl.get(k)
+            try:
+                st.session_state["tr_date"] = date.fromisoformat(target)
+            except Exception:
+                pass
+            return True
+    return False
+
 # =========================
 # Global Weight Sync (profile -> all tabs)
 # =========================
@@ -1056,7 +1133,7 @@ def _set_global_weight(code_hash: str, w: float, *, write_back_profile: bool = T
         return
 
     st.session_state["profile_weight_kg"] = w
-    st.session_state["la_weight_kg"] = w  # backward-compat
+    st.session_state["latest_weight_kg"] = w  # backward-compat
 
     if write_back_profile:
         _set_profile_weight_kg_in_snapshot(code_hash, w)
@@ -1071,7 +1148,7 @@ def _sync_weight_defaults_before_render(code_hash: str, *, fallback: float = 45.
     # set global weight if not already set
     if float(st.session_state.get("profile_weight_kg") or 0) <= 0:
         st.session_state["profile_weight_kg"] = w_prof
-    st.session_state["la_weight_kg"] = float(st.session_state["profile_weight_kg"])
+    st.session_state["latest_weight_kg"] = float(st.session_state["profile_weight_kg"])
 
     # seed widget keys BEFORE they are created (safe). If a key was manually edited, keep it.
     for k in WEIGHT_KEYS:
@@ -1143,7 +1220,7 @@ def delete_record_by_id(record_id: int) -> None:
     conn.commit()
     conn.close()
 
-def delete_la_record(code_hash: str, kind: str) -> bool:
+def delete_latest_record(code_hash: str, kind: str) -> bool:
     conn = sqlite3.connect(DATA_DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT id FROM records WHERE code_hash=? AND kind=? ORDER BY id DESC LIMIT 1", (code_hash, kind))
@@ -1156,7 +1233,7 @@ def delete_la_record(code_hash: str, kind: str) -> bool:
     conn.commit()
     conn.close()
     return True
-def auto_fill_from_la_records(code_hash: str):
+def auto_fill_from_latest_records(code_hash: str):
     """基本情報入力後に、最新の保存記録をフォームに自動反映（初回のみ）"""
     if st.session_state.get("_auto_filled", False):
         return
@@ -1173,7 +1250,7 @@ def auto_fill_from_la_records(code_hash: str):
             for k_map in [
                 ("h_desired","desired_cm"),
                 ("h_alp","alp"), ("h_ba","ba"), ("h_igf1","igf1"),
-                ("h_t","osterone"), ("h_e2","estradiol"),
+                ("h_t","testosterone"), ("h_e2","estradiol"),
                 ("h_y1","h_y1"), ("h_y2","h_y2"), ("h_y3","h_y3"),
                 ("h_w1","w_y1"), ("h_w2","w_y2"), ("h_w3","w_y3"),
                 ("h_date_y1","date_y1"), ("h_date_y2","date_y2"), ("h_date_y3","date_y3"),
@@ -1228,15 +1305,15 @@ def load_basic_info_snapshot(code_hash: str) -> bool:
 
 TRAINING_KEYS = ["tr_date","tr_type","tr_duration","tr_rpe","tr_focus","tr_notes"]
 
-def save_training_la(code_hash: str):
+def save_training_latest(code_hash: str):
     payload = {k: st.session_state.get(k) for k in TRAINING_KEYS}
     if isinstance(payload.get("tr_date"), date):
         payload["tr_date"] = payload["tr_date"].isoformat()
-    save_snapshot(code_hash, "training_la", payload)
+    save_snapshot(code_hash, "training_latest", payload)
     save_record(code_hash, "training_log", payload, {"summary":"training_log"})
 
-def load_training_la(code_hash: str) -> bool:
-    pl = load_snapshot(code_hash, "training_la")
+def load_training_latest(code_hash: str) -> bool:
+    pl = load_snapshot(code_hash, "training_latest")
     if not pl:
         return False
     if isinstance(pl.get("tr_date"), str):
@@ -1260,7 +1337,7 @@ def _set_if_empty(k, v):
     if k not in st.session_state or st.session_state.get(k) in (None, "", 0, 0.0):
         st.session_state[k] = v
 
-def auto_fill_la_all_tabs(code_hash: str):
+def auto_fill_latest_all_tabs(code_hash: str):
     """基本情報入力後に、保存済み最新データを各タブの入力欄へ自動反映（初回のみ）"""
     if st.session_state.get("_auto_filled_all", False):
         return
@@ -1271,7 +1348,7 @@ def auto_fill_la_all_tabs(code_hash: str):
     # まず snapshots（下書き）を優先
     for kind, keys in [
         ("height_draft", ["h_desired","h_date_y1","h_date_y2","h_date_y3","h_y1","h_y2","h_y3","h_w1","h_w2","h_w3","h_alp","h_ba","h_igf1","h_t","h_e2"]),
-        ("anemia_draft", ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end__type"]),
+        ("anemia_draft", ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end_test_type"]),
         ("meal_draft", ["meal_goal","meal_intensity","meal_weight","b_c","b_p","b_v","l_c","l_p","l_v","d_c","d_p","d_v"]),
     ]:
         try:
@@ -1291,7 +1368,7 @@ def auto_fill_la_all_tabs(code_hash: str):
             for ui, pk in [
                 ("h_desired","desired_cm"),
                 ("h_alp","alp"), ("h_ba","ba"), ("h_igf1","igf1"),
-                ("h_t","osterone"), ("h_e2","estradiol"),
+                ("h_t","testosterone"), ("h_e2","estradiol"),
                 ("h_y1","h_y1"), ("h_y2","h_y2"), ("h_y3","h_y3"),
                 ("h_w1","w_y1"), ("h_w2","w_y2"), ("h_w3","w_y3"),
                 ("h_date_y1","date_y1"), ("h_date_y2","date_y2"), ("h_date_y3","date_y3"),
@@ -1305,7 +1382,7 @@ def auto_fill_la_all_tabs(code_hash: str):
             for ui, pk in [("sa_hb","hb"),("sa_ferr","ferritin"),("sa_fe","fe"),("sa_tibc","tibc"),("sa_tsat","tsat")]:
                 _set_if_empty(ui, pl.get(pk))
             break
-    # Meal la
+    # Meal latest
     for r in rows:
         if r.get("kind") == "meal_day":
             pl = r.get("payload") or {}
@@ -1671,7 +1748,7 @@ def height_page(code_hash: str):
     ba = c[0].number_input("骨年齢（年）", 0.0, 25.0, step=0.1, key="h_ba")
     alp = c[1].number_input("ALP", 0.0, 5000.0, step=1.0, key="h_alp")
     igf1 = c[2].number_input("ソマトメジンC（IGF-1）", 0.0, 2000.0, step=1.0, key="h_igf1")
-    osterone = st.number_input("テストステロン（任意）", 0.0, 3000.0, step=1.0, key="h_t")
+    testosterone = st.number_input("テストステロン（任意）", 0.0, 3000.0, step=1.0, key="h_t")
     estradiol = st.number_input("エストラジオール(E2)（任意）", 0.0, 2000.0, step=1.0, key="h_e2")
 
     igf_label, igf_rng, low_normal = igf1_classify(sex_code, age, nz(igf1))
@@ -1768,7 +1845,7 @@ def height_page(code_hash: str):
     if st.button("結果保存（身長）", key="h_result_save"):
         save_record(code_hash, "height_result", {
             "desired_cm": desired, "alp": alp, "ba": ba, "igf1": igf1,
-            "osterone": osterone, "estradiol": estradiol,
+            "testosterone": testosterone, "estradiol": estradiol,
             "date_y1": d1, "date_y2": d2, "date_y3": d3,
             "h_y1": h1, "h_y2": h2, "h_y3": h3,
             "w_y1": w1, "w_y2": w2, "w_y3": w3,
@@ -1802,7 +1879,7 @@ def render_riona_output(out: dict):
         st.warning(" / ".join(p24["alerts"]))
 
 
-def estimate_endurance_gain(_kind: str, baseline_value: float, hb_now: float, hb_pred: float, ferr_now: float | None, ferr_pred: float | None):
+def estimate_endurance_gain(test_kind: str, baseline_value: float, hb_now: float, hb_pred: float, ferr_now: float | None, ferr_pred: float | None):
     """
     Very conservative heuristic for demo:
       - assume aerobic capacity roughly tracks Hb improvement and iron repletion.
@@ -1826,9 +1903,9 @@ def estimate_endurance_gain(_kind: str, baseline_value: float, hb_now: float, hb
     pct = max(0.0, min(0.12, pct))  # 0-12%
 
     # if already very high baseline, dampen (ceiling effect)
-    if _kind == "yoyo" and baseline_value >= 2000:
+    if test_kind == "yoyo" and baseline_value >= 2000:
         pct *= 0.6
-    if _kind == "shuttle" and baseline_value >= 130:
+    if test_kind == "shuttle" and baseline_value >= 130:
         pct *= 0.6
 
     return baseline_value * (1.0 + pct), pct
@@ -1846,7 +1923,7 @@ def anemia_page(code_hash: str):
         else:
             st.info("保存データがありません。")
     if st.button("保存", key="a_save_top"):
-        keys = ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end__type"]
+        keys = ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end_test_type"]
         save_snapshot(code_hash, "anemia_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
@@ -1860,11 +1937,11 @@ def anemia_page(code_hash: str):
     tsat_override = c5.number_input("TSAT上書き(0=自動)", 0.0, 100.0, 0.0, 0.1, key="sa_tsat")
 
     st.markdown("#### 持久力テスト（任意）")
-    end__type = st.selectbox("入力するテスト", ["シャトルラン（回数）", "Yo-Yo（距離m）"], index=0, key="end__type")
+    end_test_type = st.selectbox("入力するテスト", ["シャトルラン（回数）", "Yo-Yo（距離m）"], index=0, key="end_test_type")
     end_current = st.number_input("現在の記録（回数 or 距離）", min_value=0.0, max_value=99999.0, value=float(st.session_state.get("end_current", 0.0) or 0.0), step=1.0, key="end_current")
     st.caption("※入力は任意。入力すると、Hb改善に伴う伸びを参考推定します（個人差あり）。")
     if st.button("結果保存（持久力）", key="save_endurance_baseline"):
-        save_record(code_hash, "endurance_baseline", {"": st.session_state.get("end__type",""), "current": float(st.session_state.get("end_current",0.0) or 0.0), "hb": float(hb_v or 0.0), "ferritin": float(ferr_v or 0.0), "tsat": float(tsat_val or 0.0)}, {"summary":"endurance_baseline"})
+        save_record(code_hash, "endurance_baseline", {"test": st.session_state.get("end_test_type",""), "current": float(st.session_state.get("end_current",0.0) or 0.0), "hb": float(hb_v or 0.0), "ferritin": float(ferr_v or 0.0), "tsat": float(tsat_val or 0.0)}, {"summary":"endurance_baseline"})
         st.success("保存しました。")
     hb_v,ferr_v,fe_v,tibc_v = nz(hb),nz(ferr),nz(fe),nz(tibc)
     tsat_val = tsat_from_fe_tibc(fe_v,tibc_v) if tsat_override==0 else float(tsat_override)
@@ -1896,7 +1973,7 @@ def anemia_page(code_hash: str):
         else:
             st.info("保存データがありません。")
     if st.button("保存", key="a_save_bottom"):
-        keys = ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end__type"]
+        keys = ["sa_hb","sa_ferr","sa_fe","sa_tibc","sa_tsat","sa_riona","end_current","end_test_type"]
         save_snapshot(code_hash, "anemia_draft", {k: st.session_state.get(k) for k in keys})
         st.success("保存しました。")
 
@@ -1915,7 +1992,7 @@ def anemia_page(code_hash: str):
 
         # ---- 持久力テストの伸び（参考推定）----
         end_current = float(st.session_state.get("end_current", 0.0) or 0.0)
-        end__type = st.session_state.get("end__type", "シャトルラン（回数）")
+        end_test_type = st.session_state.get("end_test_type", "シャトルラン（回数）")
         hb0 = float(hb_v or 0.0)
         hb12 = float((out.get("12w") or {}).get("Hb", hb0) or hb0)
         hb24 = float((out.get("24w") or {}).get("Hb", hb0) or hb0)
@@ -1931,7 +2008,7 @@ def anemia_page(code_hash: str):
             p12, pct12 = predict_endurance(end_current, hb0, hb12)
             p24, pct24 = predict_endurance(end_current, hb0, hb24)
             st.markdown("### Hb改善に伴う持久力の伸び（参考推定）")
-            st.caption(f"入力テスト：{end__type} / 現在：{end_current:.0f}")
+            st.caption(f"入力テスト：{end_test_type} / 現在：{end_current:.0f}")
             if p12 is not None:
                 st.write(f"12週：{p12:.0f}（+{pct12*100:.1f}%）")
             if p24 is not None:
@@ -2535,6 +2612,15 @@ def meal_page(code_hash: str):
     st.session_state.setdefault("meal_date", now_jst().date())
     meal_date = st.date_input("日付", value=st.session_state.get("meal_date"), key="meal_date")
 
+    # 記録状況（その月に“ちゃんとできている日”が一目で分かる）
+    saved_dates = set(list_meal_saved_dates(code_hash))
+    render_month_calendar("食事ログ（記録済みの日）", meal_date if isinstance(meal_date, date) else now_jst().date(), saved_dates)
+    if _meal_date_key(meal_date) in saved_dates:
+        st.success("この日付には『食事ログ（確定）』が保存されています。続きがあれば追加して、再度保存できます。")
+    else:
+        st.info("この日付は未保存です。入力後に『食事ログを保存』を押してください。")
+
+
     # 日付を変えたら復元フラグをリセット（写真は新規にする）
     if st.session_state.get("_meal_last_date") != _meal_date_key(meal_date):
         st.session_state["_meal_last_date"] = _meal_date_key(meal_date)
@@ -2796,8 +2882,24 @@ def exercise_prescription_page(code_hash: str):
     st.subheader("🏋️ 運動処方")
     render_streak_medal(code_hash)
     sport = st.session_state.get("sport", SPORTS[0])
-    # ---- Training log (per-user la + history) ----
+    # ---- Training log (per-user latest + history) ----
     with st.expander("📝 トレーニング（保存・最新読み込み）", expanded=True):
+        # --- 過去ログへ戻る（カレンダー） ---
+        tr_dates = set(list_training_dates(code_hash))
+        st.session_state.setdefault("tr_view_month", now_jst().date())
+        with st.expander("📅 過去ログへ戻る（カレンダー）", expanded=False):
+            month_anchor = st.date_input("表示する月（任意）", value=st.session_state.get("tr_view_month"), key="tr_view_month")
+            render_month_calendar("運動ログ（記録済みの日）", month_anchor, tr_dates)
+            st.session_state.setdefault("tr_pick_date", now_jst().date())
+            pick = st.date_input("読み込みたい日付", value=st.session_state.get("tr_pick_date"), key="tr_pick_date")
+            if st.button("この日付の運動ログを読み込む", key="tr_load_by_date", use_container_width=True):
+                ok = load_training_by_date(code_hash, pick)
+                if ok:
+                    st.success("読み込みました。下のフォームに反映されています。")
+                    st.rerun()
+                else:
+                    st.info("その日付の保存ログが見つかりませんでした。")
+
         st.session_state.setdefault("tr_date", now_jst().date())
         st.session_state.setdefault("tr_type", "チーム練習")
         st.session_state.setdefault("tr_duration", 0)
@@ -2838,14 +2940,14 @@ def exercise_prescription_page(code_hash: str):
         with cA:
             if st.button("保存", key="tr_log_save"):
                 try:
-                    save_training_la(code_hash)
+                    save_training_latest(code_hash)
                     st.success("保存しました。")
                 except Exception as e:
                     st.error(f"保存に失敗: {e}")
         with cB:
             if st.button("最新を読み込み", key="tr_log_load"):
                 try:
-                    ok = load_training_la(code_hash)
+                    ok = load_training_latest(code_hash)
                     if ok:
                         st.success("最新のトレーニングを読み込みました。")
                         st.rerun()
@@ -2857,8 +2959,8 @@ def exercise_prescription_page(code_hash: str):
         with cD:
             if st.button("削除（最新）", key="tr_log_delete"):
                 try:
-                    delete_snapshot(code_hash, "training_la")
-                    delete_la_record(code_hash, "training_log")
+                    delete_snapshot(code_hash, "training_latest")
+                    delete_latest_record(code_hash, "training_log")
                     # also clear current inputs to defaults
                     st.session_state["tr_duration"] = 0
                     st.session_state["tr_rpe"] = 5
@@ -3520,7 +3622,7 @@ APP_PAGES = [
     ("profile", "👤 個人情報"),
 ]
 
-LINE_OFFICIAL_URL = (os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip() or "https://line.me/R/ti/p/@983prujv")  # 公式LINE
+LINE_OFFICIAL_URL = (os.getenv("KIWI_LINE_OFFICIAL_URL", "").strip() or "https://line.me/R/ti/p/@983prujv")  # 公式LINE（テスト）
 LINE_PREFILL_TEXT = os.getenv("KIWI_LINE_PREFILL_TEXT", "怪我の相談（アプリ）: ").strip()
 
 def _route_get():
@@ -3616,7 +3718,7 @@ def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
     if w > 0:
         # Always treat profile as the source of truth
         st.session_state["profile_weight_kg"] = float(w)
-        st.session_state["la_weight_kg"] = float(w)
+        st.session_state["latest_weight_kg"] = float(w)
 
         # Clear "manual" flags so other tabs can re-seed from updated profile on the next rerun
         for _k in WEIGHT_KEYS:
@@ -3636,13 +3738,12 @@ def _sync_profile_to_session(code_hash: str, prof: dict | None = None):
         h = float(prof.get("height_cm") or 0.0)
     except Exception:
         h = 0.0
-    if ("la_height_cm" not in st.session_state) or float(st.session_state.get("la_height_cm") or 0.0) <= 0.0:
+    if ("latest_height_cm" not in st.session_state) or float(st.session_state.get("latest_height_cm") or 0.0) <= 0.0:
         if h > 0:
-            st.session_state["la_height_cm"] = h
+            st.session_state["latest_height_cm"] = h
 
 
 def profile_top_page(code_hash: str):
-    render_brand_header()
     st.markdown('<div class="km-wrap">', unsafe_allow_html=True)
     st.markdown("## 基礎情報（最初に1回）")
     prof = _load_profile(code_hash)
@@ -3708,7 +3809,6 @@ def profile_top_page(code_hash: str):
         st.markdown('</div>', unsafe_allow_html=True)
 
 def menu_select_page(code_hash: str):
-    render_brand_header()
     # 40代の親が迷わず押せる：大きい2列ボタン（スマホ最適）
     st.markdown('<div class="km-menu-title">やりたいことを選んでください</div>', unsafe_allow_html=True)
     st.markdown('<div class="km-menu-sub">迷ったら、いちばん気になる項目を1つ選べばOKです。</div>', unsafe_allow_html=True)
@@ -3740,10 +3840,10 @@ def menu_select_page(code_hash: str):
 
     st.markdown('<div class="km-footer-note">※ グラフや詳細は、必要なときだけ開けばOKです。</div>', unsafe_allow_html=True)
 
-def injury_line__box():
-    st.markdown("### 🧪医師へ相談を送る")
+def injury_line_test_box():
+    st.markdown("### 🧪（テスト）医師へ相談を送る")
     if not LINE_OFFICIAL_URL:
-        st.info("公式LINE送信はです。環境変数 KIWI_LINE_OFFICIAL_URL を設定すると有効になります。")
+        st.info("公式LINE送信はテスト実装です。環境変数 KIWI_LINE_OFFICIAL_URL を設定すると有効になります。")
         return
     st.markdown("AIの結果を踏まえて医師に相談したい場合、公式LINEを開いて送信できます。")
     ok = st.checkbox("公式LINEへ送信します（確認）", key="inj_line_confirm")
@@ -3752,7 +3852,7 @@ def injury_line__box():
         st.link_button("公式LINEを開く", LINE_OFFICIAL_URL)
 
 def main():
-    st.set_page_config(page_title="ジュニアス", page_icon="assets/favicon.png", layout="wide")
+    st.set_page_config(page_title="Height & Riona (Rebuild Stable)", layout="wide")
     premium_css()
     apply_css()
     init_users_db()
@@ -3768,7 +3868,7 @@ def main():
 
     # 最新データの自動復元（入力補助）
     try:
-        auto_fill_from_la_records(code_hash)
+        auto_fill_from_latest_records(code_hash)
     except Exception:
         pass
 
@@ -3817,7 +3917,7 @@ def main():
         injury_page(code_hash)
     elif r == "coldflu":
         coldflu_page(code_hash)
-        injury_line__box()
+        injury_line_test_box()
     elif r == "sleep":
         sleep_page(code_hash)
     elif r == "soccer":
